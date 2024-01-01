@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <string.h>
 
 struct bst_node {
 	struct bst_node *parent;
@@ -74,16 +77,53 @@ static void traverse(struct bst_node *node)
  *
  * Pipe output to e.g. "dot -Tx11" to see generated graph.
  */
-static void print_dot(struct bst_root *root)
+static void print_dot(struct bst_root *root, char *argv[])
 {
+	if (argv[0]) {
+		pid_t child;
+		int pipefd[2];
+		int r = pipe2(pipefd, O_CLOEXEC);
+		if (r < 0) {
+			perror("pipe2");
+			exit(1);
+		}
+		child = fork();
+		if (child < 0) {
+			perror("fork");
+			exit(1);
+		} else if (child == 0) {
+			if (dup2(pipefd[0], 0) < 0) {
+				perror("child: dup2");
+				exit(1);
+			}
+			if (execvp(argv[0], argv) < 0) {
+				perror("child execvp");
+				exit(1);
+			}
+		}
+		if (dup2(pipefd[1], 1) < 0) {
+			perror("dup2");
+			exit(1);
+		}
+		close(pipefd[0]);
+		close(pipefd[1]);
+	}
 	printf("graph {\n");
 	traverse(root->node);
 	printf("}\n");
 }
 
-int main()
+int main(int argc, char *argv[])
 {
 	struct bst_root root = { 0 };
+
+	if (argc == 2 && !strcmp(argv[1], "-h")) {
+		printf("\
+Usage: %s [CMD [ARGS]...]\n\
+Populate binary tree, print its graphviz dot script to stdout.\n\
+If given, run CMD with ARGS and pipe dot script to it.\n", argv[0]);
+		exit(0);
+	}
 
 	for (;;) {
 		char *line = NULL;
@@ -119,7 +159,6 @@ int main()
 		num->val = val;
 		bst_insert(&root, &num->node, num_cmp);
 	}
-
-	print_dot(&root);
+	print_dot(&root, &argv[1]);
 	return 0;
 }
