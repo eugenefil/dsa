@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <string.h>
 
+/* see https://en.wikipedia.org/wiki/Binary_search_tree */
+
 struct bst_node {
 	struct bst_node *parent;
 	struct bst_node *left;
@@ -105,6 +107,25 @@ static void bst_delete(struct bst_root *root, struct bst_node *node)
 	}
 }
 
+static void _bst_preorder(struct bst_node *node,
+			  void (*fn)(struct bst_node *node))
+{
+	struct bst_node *left, *right;
+	if (!node)
+		return;
+	left = node->left;
+	right = node->right;
+	fn(node);
+	_bst_preorder(left, fn);
+	_bst_preorder(right, fn);
+}
+
+static void bst_preorder(struct bst_root *root,
+			 void (*fn)(struct bst_node *node))
+{
+	_bst_preorder(root->node, fn);
+}
+
 struct num {
 	struct bst_node node;
 	long val;
@@ -117,11 +138,9 @@ static int num_cmp(struct bst_node *new, struct bst_node *old)
 	return n < o ? -1 : (n == o ? 0 : 1);
 }
 
-static void traverse(struct bst_node *node)
+static void gen_dot(struct bst_node *node)
 {
 	unsigned long long nid, lid, rid;
-	if (!node)
-		return;
 	nid = (unsigned long long)node;
 	lid = node->left ? (unsigned long long)node->left :
 		(unsigned long long)&node->left;
@@ -134,8 +153,6 @@ static void traverse(struct bst_node *node)
 		printf("%llx [shape=point]\n", lid);
 	if (!node->right)
 		printf("%llx [shape=point]\n", rid);
-	traverse(node->left);
-	traverse(node->right);
 }
 
 /**
@@ -182,7 +199,7 @@ static void print_dot(struct bst_root *root, char *argv[])
 	}
 
 	printf("graph {\n");
-	traverse(root->node);
+	bst_preorder(root, gen_dot);
 	printf("}\n");
 
 	if (argv[0]) {
@@ -274,5 +291,6 @@ If given, run CMD with ARGS and pipe dot script to it.\n", argv[0]);
 		free(num);
 		print_dot(&root, &argv[1]);
 	}
+	bst_preorder(&root, (void (*)(struct bst_node *))free);
 	return 0;
 }
