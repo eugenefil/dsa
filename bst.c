@@ -39,6 +39,72 @@ static void bst_insert(struct bst_root *root, struct bst_node *node,
 		parent->right = node;
 }
 
+static struct bst_node *bst_find(struct bst_root *root, struct bst_node *node,
+				 int (*cmp)(struct bst_node *n1, struct bst_node *n2))
+{
+	struct bst_node *n = root->node;
+	while (n) {
+		int r = cmp(node, n);
+		if (r == 0)
+			break;
+		else if (r < 0)
+			n = n->left;
+		else
+			n = n->right;
+	}
+	return n;
+}
+
+static void bst_shift(struct bst_root *root, struct bst_node *what,
+		      struct bst_node *with)
+{
+	if (!what->parent)
+		root->node = with;
+	else if (what->parent->left == what)
+		what->parent->left = with;
+	else
+		what->parent->right = with;
+	if (with)
+		with->parent = what->parent;
+}
+
+static void bst_delete(struct bst_root *root, struct bst_node *node)
+{
+	if (!node->left)
+		bst_shift(root, node, node->right);
+	else if (!node->right)
+		bst_shift(root, node, node->left);
+	else {
+		/* replace node with the next lowest after it like so:
+		 * (note, next lowest has no left, b/c it _is_ the lowest)
+		 * - if next lowest is node's right, attach node's left to it
+		 * - if next lowest is below node's right, detach it from its
+		 *   place by replacing with its right, then attach node's
+		 *   right and left to it
+		 */
+
+		/* find next lowest after node */
+		struct bst_node *next = node->right;
+		while (next->left)
+			next = next->left;
+
+		if (next != node->right) {
+			/* next is somewhere below node's right - detach
+			 * it from there by replacing it with its right
+			 */
+			bst_shift(root, next, next->right);
+			/* now next has no right - attach node's right to it */
+			next->right = node->right;
+			node->right->parent = next;
+		}
+		/* replace node with next */
+		bst_shift(root, node, next);
+		/* attach node's left to next's left */
+		next->left = node->left;
+		node->left->parent = next;
+	}
+}
+
 struct num {
 	struct bst_node node;
 	long val;
@@ -79,6 +145,8 @@ static void traverse(struct bst_node *node)
  */
 static void print_dot(struct bst_root *root, char *argv[])
 {
+	int saved_stdout;
+
 	if (argv[0]) {
 		pid_t child;
 		int pipefd[2];
@@ -101,6 +169,10 @@ static void print_dot(struct bst_root *root, char *argv[])
 				exit(1);
 			}
 		}
+		if ((saved_stdout = dup(1)) < 0) {
+			perror("dup");
+			exit(1);
+		}
 		if (dup2(pipefd[1], 1) < 0) {
 			perror("dup2");
 			exit(1);
@@ -108,13 +180,30 @@ static void print_dot(struct bst_root *root, char *argv[])
 		close(pipefd[0]);
 		close(pipefd[1]);
 	}
+
 	printf("graph {\n");
 	traverse(root->node);
 	printf("}\n");
+
+	if (argv[0]) {
+		/* close stdout to send eof to other end of pipe */
+		fflush(stdout);
+		if (dup2(saved_stdout, 1) < 0) {
+			perror("dup2");
+			exit(1);
+		}
+		close(saved_stdout);
+	}
 }
 
 int main(int argc, char *argv[])
 {
+	char *line = NULL;
+	size_t n = 0;
+	ssize_t r;
+	long val;
+	char *endptr;
+	struct num *num;
 	struct bst_root root = { 0 };
 
 	if (argc == 2 && !strcmp(argv[1], "-h")) {
@@ -126,14 +215,8 @@ If given, run CMD with ARGS and pipe dot script to it.\n", argv[0]);
 	}
 
 	for (;;) {
-		char *line = NULL;
-		size_t n = 0;
-		ssize_t r;
-		long val;
-		char *endptr;
-		struct num *num;
 
-		fprintf(stderr, "Enter a number (none to finish): ");
+		fprintf(stderr, "Add number (none to finish): ");
 		r = getline(&line, &n, stdin);
 		if (r < 0) {
 			if (feof(stdin))
@@ -158,7 +241,38 @@ If given, run CMD with ARGS and pipe dot script to it.\n", argv[0]);
 		}
 		num->val = val;
 		bst_insert(&root, &num->node, num_cmp);
+		print_dot(&root, &argv[1]);
 	}
-	print_dot(&root, &argv[1]);
+
+	for (;;) {
+		struct num dummy = { 0 };
+
+		fprintf(stderr, "Delete number (none to finish): ");
+		r = getline(&line, &n, stdin);
+		if (r < 0) {
+			if (feof(stdin))
+				break;
+			perror("getline");
+			exit(1);
+		}
+		if (r > 0 && line[r - 1] == '\n')
+			line[--r] = '\0';
+		if (r == 0)
+			break;
+
+		errno = 0;
+		dummy.val = strtol(line, &endptr, 10);
+		if (errno < 0 || *endptr != '\0')
+			continue;
+		
+		num = (struct num *)bst_find(&root, &dummy.node, num_cmp);
+		if (!num) {
+			fprintf(stderr, "Number not found\n");
+			continue;
+		}
+		bst_delete(&root, &num->node);
+		free(num);
+		print_dot(&root, &argv[1]);
+	}
 	return 0;
 }
