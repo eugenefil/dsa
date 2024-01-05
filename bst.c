@@ -5,6 +5,9 @@
 #include <fcntl.h>
 #include <string.h>
 #include <time.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <stdbool.h>
 
 /* see https://en.wikipedia.org/wiki/Binary_search_tree */
 
@@ -179,18 +182,30 @@ static void gen_dot(struct bst_node *node)
  *
  * Pipe output to e.g. "dot -Tx11" to see generated graph.
  */
-static void print_dot(struct bst_root *root, char *argv[])
+static void print_dot(struct bst_root *root, char *argv[], bool wait_cmd)
 {
 	int saved_stdout;
 
 	if (argv[0]) {
 		pid_t child;
+		struct sigaction sa = { 0 };
 		int pipefd[2];
 		int r = pipe2(pipefd, O_CLOEXEC);
 		if (r < 0) {
 			perror("pipe2");
 			exit(1);
 		}
+
+		if (wait_cmd)
+			sa.sa_handler = SIG_DFL;
+		else
+			sa.sa_handler = SIG_IGN;
+		r = sigaction(SIGCHLD, &sa, NULL);
+		if (r < 0) {
+			perror("sigaction");
+			exit(1);
+		}
+
 		child = fork();
 		if (child < 0) {
 			perror("fork");
@@ -229,6 +244,15 @@ static void print_dot(struct bst_root *root, char *argv[])
 			exit(1);
 		}
 		close(saved_stdout);
+
+		if (wait_cmd) {
+			while (wait(NULL) < 0) {
+				if (errno != EINTR) {
+					perror("wait");
+					exit(1);
+				}
+			}
+		}
 	}
 }
 
@@ -276,7 +300,7 @@ static void test(int n, int bst_size, char *argv[])
 		h[i] = bst_height(root.node);
 		if (argv[0]) {
 			printf("height %d\n", h[i]);
-			print_dot(&root, argv);
+			print_dot(&root, argv, true);
 		}
 	}
 
@@ -375,7 +399,7 @@ int main(int argc, char *argv[])
 		}
 		num->val = val;
 		bst_insert(&root, &num->node, num_cmp);
-		print_dot(&root, &argv[1]);
+		print_dot(&root, &argv[1], false);
 	}
 
 	for (;;) {
@@ -406,7 +430,7 @@ int main(int argc, char *argv[])
 		}
 		bst_delete(&root, &num->node);
 		free(num);
-		print_dot(&root, &argv[1]);
+		print_dot(&root, &argv[1], false);
 	}
 	bst_preorder(&root, (void (*)(struct bst_node *))free);
 	return 0;
