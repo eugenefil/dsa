@@ -111,8 +111,8 @@ static void bst_delete(struct bst_root *root, struct bst_node *node)
 	}
 }
 
-static void _bst_preorder(struct bst_node *node,
-			  void (*fn)(struct bst_node *node))
+static void bst_preorder(struct bst_node *node,
+			 void (*fn)(struct bst_node *node))
 {
 	struct bst_node *left, *right;
 	if (!node)
@@ -120,14 +120,8 @@ static void _bst_preorder(struct bst_node *node,
 	left = node->left;
 	right = node->right;
 	fn(node);
-	_bst_preorder(left, fn);
-	_bst_preorder(right, fn);
-}
-
-static void bst_preorder(struct bst_root *root,
-			 void (*fn)(struct bst_node *node))
-{
-	_bst_preorder(root->node, fn);
+	bst_preorder(left, fn);
+	bst_preorder(right, fn);
 }
 
 static int _bst_height(struct bst_node *node, int h)
@@ -182,7 +176,7 @@ static void gen_dot(struct bst_node *node)
  *
  * Pipe output to e.g. "dot -Tx11" to see generated graph.
  */
-static void print_dot(struct bst_root *root, char *argv[], bool wait_cmd)
+static void print_dot(struct bst_node *node, char *argv[], bool wait_cmd)
 {
 	int saved_stdout;
 
@@ -233,7 +227,7 @@ static void print_dot(struct bst_root *root, char *argv[], bool wait_cmd)
 	}
 
 	printf("graph {\n");
-	bst_preorder(root, gen_dot);
+	bst_preorder(node, gen_dot);
 	printf("}\n");
 
 	if (argv[0]) {
@@ -300,7 +294,7 @@ static void test(int n, int bst_size, char *argv[])
 		h[i] = bst_height(root.node);
 		if (argv[0]) {
 			printf("height %d\n", h[i]);
-			print_dot(&root, argv, true);
+			print_dot(root.node, argv, true);
 		}
 	}
 
@@ -399,7 +393,7 @@ int main(int argc, char *argv[])
 		}
 		num->val = val;
 		bst_insert(&root, &num->node, num_cmp);
-		print_dot(&root, &argv[1], false);
+		print_dot(root.node, &argv[1], false);
 	}
 
 	for (;;) {
@@ -430,8 +424,8 @@ int main(int argc, char *argv[])
 		}
 		bst_delete(&root, &num->node);
 		free(num);
-		print_dot(&root, &argv[1], false);
+		print_dot(root.node, &argv[1], false);
 	}
-	bst_preorder(&root, (void (*)(struct bst_node *))free);
+	bst_preorder(root.node, (void (*)(struct bst_node *))free);
 	return 0;
 }
