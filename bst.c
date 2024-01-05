@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <time.h>
 
 /* see https://en.wikipedia.org/wiki/Binary_search_tree */
 
@@ -126,6 +127,24 @@ static void bst_preorder(struct bst_root *root,
 	_bst_preorder(root->node, fn);
 }
 
+static int _bst_height(struct bst_node *node, int h)
+{
+	int l, r;
+	if (!node)
+		return h;
+	l = r = ++h;
+	if (node->left)
+		l = _bst_height(node->left, h);
+	if (node->right)
+		r = _bst_height(node->right, h);
+	return l > r ? l : r;
+}
+
+static int bst_height(struct bst_node *node)
+{
+	return _bst_height(node, 0);
+}
+
 struct num {
 	struct bst_node node;
 	long val;
@@ -213,6 +232,78 @@ static void print_dot(struct bst_root *root, char *argv[])
 	}
 }
 
+int intcmp(const void *p1, const void *p2)
+{
+	int n1 = *(int *)p1;
+	int n2 = *(int *)p2;
+	return n1 < n2 ? -1 : (n1 == n2 ? 0 : 1);
+}
+
+#define N 1000
+#define SIZE 1024
+static void test(int n, int bst_size, char *argv[])
+{
+	int *h, H;
+	struct num *nums;
+
+	if (n <= 0)
+		n = N;
+	if (bst_size <= 0)
+		bst_size = SIZE;
+	printf("build %d random trees of %d nodes\n", n, bst_size);
+
+	h = calloc(n, sizeof(int));
+	if (!h) {
+		perror("calloc");
+		exit(0);
+	}
+
+	nums = calloc(bst_size, sizeof(struct num));
+	if (!nums) {
+		perror("calloc");
+		free(h);
+		exit(0);
+	}
+
+	srandom(time(NULL));
+	for (int i = 0; i < n; ++i) {
+		struct bst_root root = { 0 };
+		memset(nums, 0, bst_size * sizeof(*nums));
+		for (int j = 0; j < bst_size; ++j) {
+			nums[j].val = random();
+			bst_insert(&root, &nums[j].node, num_cmp);
+		}
+		h[i] = bst_height(root.node);
+		if (argv[0]) {
+			printf("height %d\n", h[i]);
+			print_dot(&root, argv);
+		}
+	}
+
+	qsort(h, n, sizeof(int), intcmp);
+	printf("min height %d\n", h[0]);
+	printf("max height %d\n", h[n - 1]);
+	printf("median height %d\n", h[n / 2]);
+	H = 0;
+	for (int i = 0; i < n; ++i)
+		H += h[i];
+	printf("avg height %.2f\n", (float)H / n);
+
+	free(nums);
+	free(h);
+}
+
+void usage(const char *prog)
+{
+	printf("\
+Usage: %s [OPTION] [CMD [ARGS]...]\n\
+Populate binary tree, print its graphviz dot script to stdout.\n\
+If given, run CMD with ARGS and pipe dot script to it.\n\
+\n\
+  -test[=NUM_TREES,TREE_SIZE]    create random trees and\n\
+                                 print their statistics\n", prog);
+}
+
 int main(int argc, char *argv[])
 {
 	char *line = NULL;
@@ -224,10 +315,36 @@ int main(int argc, char *argv[])
 	struct bst_root root = { 0 };
 
 	if (argc == 2 && !strcmp(argv[1], "-h")) {
-		printf("\
-Usage: %s [CMD [ARGS]...]\n\
-Populate binary tree, print its graphviz dot script to stdout.\n\
-If given, run CMD with ARGS and pipe dot script to it.\n", argv[0]);
+		usage(argv[0]);
+		exit(0);
+	} else if (argc >= 2 && !strncmp(argv[1], "-test", 5)) {
+		unsigned long n = 0;
+		unsigned long size = 0;
+		if (strlen(argv[1]) > 5) {
+			char *endptr;
+			char *s = argv[1] + 5;
+			if (*s != '=') {
+				usage(argv[0]);
+				exit(1);
+			}
+			++s;
+
+			errno = 0;
+			n = strtoul(s, &endptr, 10);
+			if (errno != 0 || endptr == s || *endptr != ',') {
+				usage(argv[0]);
+				exit(1);
+			}
+			s = endptr + 1;
+
+			errno = 0;
+			size = strtoul(s, &endptr, 10);
+			if (errno != 0 || endptr == s || *endptr != '\0') {
+				usage(argv[0]);
+				exit(1);
+			}
+		}
+		test(n, size, &argv[2]);
 		exit(0);
 	}
 
