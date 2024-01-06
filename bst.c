@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <stdbool.h>
+#include <math.h>
 
 /* see https://en.wikipedia.org/wiki/Binary_search_tree */
 
@@ -262,13 +263,14 @@ int intcmp(const void *p1, const void *p2)
 static void test(int n, int bst_size, char *argv[])
 {
 	int *h, H;
+	int nH = 0;
 	struct num *nums;
 
 	if (n <= 0)
 		n = N;
 	if (bst_size <= 0)
 		bst_size = SIZE;
-	printf("build %d random trees of %d nodes\n", n, bst_size);
+	printf("build N=%d random trees of n=%d nodes\n", n, bst_size);
 
 	h = calloc(n, sizeof(int));
 	if (!h) {
@@ -285,6 +287,7 @@ static void test(int n, int bst_size, char *argv[])
 
 	srandom(time(NULL));
 	for (int i = 0; i < n; ++i) {
+		int nh = 0;
 		struct bst_root root = { 0 };
 		memset(nums, 0, bst_size * sizeof(*nums));
 		for (int j = 0; j < bst_size; ++j) {
@@ -292,10 +295,19 @@ static void test(int n, int bst_size, char *argv[])
 			bst_insert(&root, &nums[j].node, num_cmp);
 		}
 		h[i] = bst_height(root.node);
+		for (int j = 0; j < bst_size; ++j) {
+			struct bst_node *node = &nums[j].node;
+			while (node) {
+				++nh;
+				node = node->parent;
+			}
+		}
 		if (argv[0]) {
 			printf("height %d\n", h[i]);
+			printf("avg node height %.2f\n", (float)nh / bst_size);
 			print_dot(root.node, argv, true);
 		}
+		nH += nh;
 	}
 
 	qsort(h, n, sizeof(int), intcmp);
@@ -306,6 +318,8 @@ static void test(int n, int bst_size, char *argv[])
 	for (int i = 0; i < n; ++i)
 		H += h[i];
 	printf("avg height %.2f\n", (float)H / n);
+	printf("avg node height %.2f\n", (float)nH / (n * bst_size));
+	printf("log2(n) %.2f\n", log2f(bst_size));
 
 	free(nums);
 	free(h);
