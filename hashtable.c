@@ -7,24 +7,29 @@
 #include <math.h>
 #include <regex.h>
 
+static int verbose;
+const char *argv0;
+
 struct hashobj {
 	struct hashobj *next;
 	const void *key;
+	unsigned hash;
 	void *data;
 };
 
 struct hashtable {
 	struct hashobj **buckets;
 	size_t nbuckets;
+	size_t nkeys;
 	unsigned (*hash)(const void *key);
 	int (*cmp)(const void *key1, const void *key2);
 };
 
-static int hashtable_init(struct hashtable *tbl, size_t size,
+static int hashtable_init(struct hashtable *tbl, size_t nbuckets,
 			  unsigned (*hash)(const void *key),
 			  int (*cmp)(const void *key1, const void *key2))
 {
-	tbl->nbuckets = size;
+	tbl->nbuckets = nbuckets;
 	tbl->buckets = calloc(tbl->nbuckets, sizeof(*tbl->buckets));
 	if (!tbl->buckets)
 		return -ENOMEM;
@@ -33,13 +38,34 @@ static int hashtable_init(struct hashtable *tbl, size_t size,
 	return 0;
 }
 
+static int hashtable_grow(struct hashtable *tbl)
+{
+	size_t nbuckets = tbl->nbuckets * 2;
+	struct hashobj **buckets = calloc(nbuckets, sizeof(*tbl->buckets));
+	if (!buckets)
+		return -ENOMEM;
+	for (int i = 0; i < tbl->nbuckets; ++i) {
+		struct hashobj *o = tbl->buckets[i];
+		while (o) {
+			struct hashobj *next = o->next;
+			int j = o->hash % nbuckets;
+			o->next = buckets[j];
+			buckets[j] = o;
+			o = next;
+		}
+	}
+	free(tbl->buckets);
+	tbl->buckets = buckets;
+	tbl->nbuckets = nbuckets;
+	return 0;
+}
+
 static int hashtable_set(struct hashtable *tbl, const void *key, void *data)
 {
-	size_t i = tbl->hash(key) % tbl->nbuckets;
+	unsigned hash = tbl->hash(key);
+	size_t i = hash % tbl->nbuckets;
 	struct hashobj *o = tbl->buckets[i];
-	struct hashobj *prev = NULL;
 	while (o) {
-		prev = o;
 		if (!tbl->cmp(o->key, key)) {
 			o->data = data;
 			return 0;
@@ -50,12 +76,15 @@ static int hashtable_set(struct hashtable *tbl, const void *key, void *data)
 	o = calloc(1, sizeof(*o));
 	if (!o)
 		return -ENOMEM;
+	++tbl->nkeys;
 	o->key = key;
+	o->hash = hash;
 	o->data = data;
-	if (prev)
-		prev->next = o;
-	else
-		tbl->buckets[i] = o;
+	o->next = tbl->buckets[i];
+	tbl->buckets[i] = o;
+	
+	if (tbl->nkeys * 100 / tbl->nbuckets > 110)
+		hashtable_grow(tbl);
 	return 0;
 }
 
@@ -85,6 +114,7 @@ static void *hashtable_del(struct hashtable *tbl, const void **key)
 			else
 				tbl->buckets[i] = o->next;
 			free(o);
+			--tbl->nkeys;
 			return data;
 		}
 		prev = o;
@@ -122,19 +152,15 @@ static int numcmp(const void *key1, const void *key2)
 	return !(key1 == key2);
 }
 
-void numtest()
+void numtest(size_t N, size_t B)
 {
-	int N = 512;
-	int nbuckets = 256;
-	float avg = (float)N / nbuckets;
-	float dev = 0;
 	struct hashtable tbl = { 0 };
-	int r = hashtable_init(&tbl, nbuckets, numhash, numcmp);
+	int r = hashtable_init(&tbl, B, numhash, numcmp);
 	if (r < 0) {
 		fprintf(stderr, "hashtable_init: %s\n", strerror(-r));
 		exit(1);
 	}
-	printf("random number test with %d buckets and %d numbers\n", nbuckets, N);
+
 	srandom(time(NULL));
 	for (int i = 0; i < N; ++i) {
 		long num = random();
@@ -144,6 +170,9 @@ void numtest()
 			exit(1);
 		}
 	}
+
+	float avg = (float)N / tbl.nbuckets;
+	float dev = 0;
 	for (int i = 0; i < tbl.nbuckets; ++i) {
 		int n = 0;
 		struct hashobj *o = tbl.buckets[i];
@@ -153,14 +182,16 @@ void numtest()
 		}
 		dev += fabsf(avg - n);
 	}
+	printf("random number test: %zu numbers in %zu buckets\n", N, tbl.nbuckets);
 	printf("avg bucket (aka load factor) %.2f\n", avg);
-	printf("avg bucket deviation %.2f\n", dev / nbuckets);
+	printf("avg bucket deviation %.2f\n", dev / tbl.nbuckets);
 }
 
-void stringtest()
+/* Pipe something like `curl https://en.wikipedia.org/wiki/List_of_2000s_films_based_on_actual_events` */
+void strtest(size_t B)
 {
 	struct hashtable tbl = { 0 };
-	int r = hashtable_init(&tbl, 256, strhash, _strcmp);
+	int r = hashtable_init(&tbl, B, strhash, _strcmp);
 	if (r < 0) {
 		fprintf(stderr, "hashtable_init: %s\n", strerror(-r));
 		exit(1);
@@ -227,14 +258,64 @@ void stringtest()
 		/* printf("bucket %d: %d keys\n", i, n); */
 		dev += fabsf(avg - n);
 	}
-	printf("string test with %zu buckets and %d strings\n", tbl.nbuckets, N);
+	printf("string test: %d strings in %zu buckets\n", N, tbl.nbuckets);
 	printf("avg bucket (aka load factor) %.2f\n", avg);
 	printf("avg bucket deviation %.2f\n", dev / tbl.nbuckets);
 }
 
-int main()
+void usage()
 {
-	numtest();
-	stringtest();
+	fprintf(stderr, "\
+Usage: %s [-v] [numtest N B | strtest B]\n\
+Populate hash table and print its statistics.\n\
+\n\
+  numtest N B    test by hashing N random numbers into B buckets\n\
+  strtest B      test by hashing identifiers from stdin into B buckets\n\
+  -v             be verbose\n\
+\n\
+Note, table may grow beyond B buckets.\n", argv0);
+}
+
+unsigned long parse_ulong_arg(char *arg)
+{
+	if (!arg || !*arg) {
+		usage();
+		exit(1);
+	}
+	char *endptr;
+	errno = 0;
+	unsigned long n = strtoul(arg, &endptr, 10);
+	if (errno != 0 || *endptr != '\0' || n == 0) {
+		usage();
+		exit(1);
+	}
+	return n;
+}
+
+int main(int argc, char *argv[])
+{
+	argv0 = argv[0];
+	char **arg = &argv[1];
+	while (*arg) {
+		if (!strcmp(*arg, "numtest")) {
+			unsigned long N = parse_ulong_arg(*++arg);
+			unsigned long B = parse_ulong_arg(*++arg);
+			numtest(N, B);
+			exit(0);
+		} else if (!strcmp(*arg, "strtest")) {
+			unsigned long B = parse_ulong_arg(*++arg);
+			strtest(B);
+			exit(0);
+		} else if (!strcmp(*arg, "-h")) {
+			usage();
+			exit(0);
+		} else if (!strcmp(*arg, "-v"))
+			verbose = 1;
+		else {
+			usage();
+			exit(1);
+		}
+		++arg;
+	}
 	return 0;
 }
