@@ -38,6 +38,19 @@ static int hashtable_init(struct hashtable *tbl, size_t nbuckets,
 	return 0;
 }
 
+static void hashtable_free(struct hashtable *tbl)
+{
+	for (int i = 0; i < tbl->nbuckets; ++i) {
+		struct hashobj *o = tbl->buckets[i];
+		while (o) {
+			struct hashobj *next = o->next;
+			free(o);
+			o = next;
+		}
+	}
+	free(tbl->buckets);
+}
+
 static int hashtable_grow(struct hashtable *tbl)
 {
 	size_t nbuckets = tbl->nbuckets * 2;
@@ -123,6 +136,18 @@ static void *hashtable_del(struct hashtable *tbl, const void **key)
 	return NULL;
 }
 
+static void hashtable_iterate(struct hashtable *tbl,
+			      void (*fn)(const void *key, void *data))
+{
+	for (int i = 0; i < tbl->nbuckets; ++i) {
+		struct hashobj *o = tbl->buckets[i];
+		while (o) {
+			fn(o->key, o->data);
+			o = o->next;
+		}
+	}
+}
+
 static unsigned fnv1a_32(const void *data, size_t size)
 {
 	/* https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function */
@@ -185,6 +210,13 @@ void numtest(size_t N, size_t B)
 	printf("random number test: %zu numbers in %zu buckets\n", N, tbl.nbuckets);
 	printf("avg bucket (aka load factor) %.2f\n", avg);
 	printf("avg bucket deviation %.2f\n", dev / tbl.nbuckets);
+
+	hashtable_free(&tbl);
+}
+
+void free_key(const void *key, void *data)
+{
+	free((void *)key);
 }
 
 /* Pipe something like `curl https://en.wikipedia.org/wiki/List_of_2000s_films_based_on_actual_events` */
@@ -261,6 +293,9 @@ void strtest(size_t B)
 	printf("string test: %d strings in %zu buckets\n", N, tbl.nbuckets);
 	printf("avg bucket (aka load factor) %.2f\n", avg);
 	printf("avg bucket deviation %.2f\n", dev / tbl.nbuckets);
+
+	hashtable_iterate(&tbl, free_key);
+	hashtable_free(&tbl);
 }
 
 void usage()
