@@ -177,6 +177,36 @@ static int numcmp(const void *key1, const void *key2)
 	return !(key1 == key2);
 }
 
+static void print_stats(struct hashtable *tbl,
+			void (*printkey)(const void *key, void *data))
+{
+	float avg = (float)tbl->nkeys / tbl->nbuckets;
+	float dev = 0;
+	for (int i = 0; i < tbl->nbuckets; ++i) {
+		int n = 0;
+		struct hashobj *o = tbl->buckets[i];
+		while (o) {
+			++n;
+			if (verbose) {
+				printf("%d: ", i);
+				printkey(o->key, o->data);
+			}
+			o = o->next;
+		}
+		if (verbose)
+			printf("bucket %d: %d keys\n", i, n);
+		dev += fabsf(avg - n);
+	}
+	printf("%zu keys in %zu buckets\n", tbl->nkeys, tbl->nbuckets);
+	printf("avg bucket (aka load factor) %.2f\n", avg);
+	printf("avg bucket deviation %.2f\n", dev / tbl->nbuckets);
+}
+
+static void print_num(const void *key, void *data)
+{
+	printf("%ld\n", (long)key);
+}
+
 void numtest(size_t N, size_t B)
 {
 	struct hashtable tbl = { 0 };
@@ -196,27 +226,19 @@ void numtest(size_t N, size_t B)
 		}
 	}
 
-	float avg = (float)N / tbl.nbuckets;
-	float dev = 0;
-	for (int i = 0; i < tbl.nbuckets; ++i) {
-		int n = 0;
-		struct hashobj *o = tbl.buckets[i];
-		while (o) {
-			++n;
-			o = o->next;
-		}
-		dev += fabsf(avg - n);
-	}
-	printf("random number test: %zu numbers in %zu buckets\n", N, tbl.nbuckets);
-	printf("avg bucket (aka load factor) %.2f\n", avg);
-	printf("avg bucket deviation %.2f\n", dev / tbl.nbuckets);
-
+	printf("random number test:\n");
+	print_stats(&tbl, print_num);
 	hashtable_free(&tbl);
 }
 
-void free_key(const void *key, void *data)
+static void free_key(const void *key, void *data)
 {
 	free((void *)key);
+}
+
+static void print_str(const void *key, void *data)
+{
+	printf("%s %zu\n", (const char *)key, (size_t)data);
 }
 
 /* Pipe something like `curl https://en.wikipedia.org/wiki/List_of_2000s_films_based_on_actual_events` */
@@ -236,7 +258,6 @@ void strtest(size_t B)
 		exit(1);
 	}
 
-	int N = 0;
 	char buf[4096];
 	for (;;) {
 		size_t n = fread(buf, 1, sizeof(buf) - 1, stdin);
@@ -259,7 +280,6 @@ void strtest(size_t B)
 			if (data)
 				cnt = (size_t)data + 1;
 			else {
-				++N;
 				void *k = malloc(len + 1);
 				if (!k) {
 					perror("malloc");
@@ -277,23 +297,8 @@ void strtest(size_t B)
 		}
 	}
 
-	float avg = (float)N / tbl.nbuckets;
-	float dev = 0;
-	for (int i = 0; i < tbl.nbuckets; ++i) {
-		int n = 0;
-		struct hashobj *o = tbl.buckets[i];
-		while (o) {
-			++n;
-			/* printf("%d: %s %zu\n", i, (char *)o->key, (size_t)o->data); */
-			o = o->next;
-		}
-		/* printf("bucket %d: %d keys\n", i, n); */
-		dev += fabsf(avg - n);
-	}
-	printf("string test: %d strings in %zu buckets\n", N, tbl.nbuckets);
-	printf("avg bucket (aka load factor) %.2f\n", avg);
-	printf("avg bucket deviation %.2f\n", dev / tbl.nbuckets);
-
+	printf("string test:\n");
+	print_stats(&tbl, print_str);
 	hashtable_iterate(&tbl, free_key);
 	hashtable_free(&tbl);
 }
