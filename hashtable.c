@@ -188,7 +188,7 @@ static void print_stats(struct hashtable *tbl,
 		while (o) {
 			++n;
 			if (verbose) {
-				printf("%d: ", i);
+				printf("%d: hash=%u ", i, o->hash);
 				printkey(o->key, o->data);
 			}
 			o = o->next;
@@ -197,7 +197,7 @@ static void print_stats(struct hashtable *tbl,
 			printf("bucket %d: %d keys\n", i, n);
 		dev += fabsf(avg - n);
 	}
-	printf("%zu keys in %zu buckets\n", tbl->nkeys, tbl->nbuckets);
+	printf("%zu key(s) in %zu buckets\n", tbl->nkeys, tbl->nbuckets);
 	printf("avg bucket (aka load factor) %.2f\n", avg);
 	printf("avg bucket deviation %.2f\n", dev / tbl->nbuckets);
 }
@@ -273,20 +273,17 @@ void strtest(size_t B)
 		regmatch_t match;
 		while (s < &buf[n] && !regexec(&regex, s, 1, &match, 0)) {
 			size_t cnt = 1;
-			size_t len = match.rm_eo - match.rm_so;
 			char *key = s + match.rm_so;
-			key[len] = '\0';
+			key[match.rm_eo - match.rm_so] = '\0';
 			void *data = hashtable_get(&tbl, key);
 			if (data)
 				cnt = (size_t)data + 1;
 			else {
-				void *k = malloc(len + 1);
-				if (!k) {
-					perror("malloc");
+				key = strdup(key);
+				if (!key) {
+					perror("strdup");
 					exit(1);
 				}
-				memcpy(k, key, len + 1);
-				key = k;
 			}
 			r = hashtable_set(&tbl, key, (void *)cnt);
 			if (r < 0) {
@@ -332,6 +329,17 @@ unsigned long parse_ulong_arg(char *arg)
 	return n;
 }
 
+void print_keyval(const void *key, void *data)
+{
+	printf("%s=%s\n", (const char *)key, (char *)data);
+}
+
+void free_keyval(const void *key, void *data)
+{
+	free((void *)key);
+	free(data);
+}
+
 int main(int argc, char *argv[])
 {
 	argv0 = argv[0];
@@ -357,5 +365,71 @@ int main(int argc, char *argv[])
 		}
 		++arg;
 	}
+
+	struct hashtable tbl = { 0 };
+	int r = hashtable_init(&tbl, 4, strhash, _strcmp);
+	if (r < 0) {
+		fprintf(stderr, "hashtable_init: %s\n", strerror(-r));
+		exit(1);
+	}
+
+	for (;;) {
+		printf("Add key (none to finish): ");
+		fflush(stdout);
+		char *key = NULL;
+		size_t n = 0;
+		ssize_t r = getline(&key, &n, stdin);
+		if (r <= 0) {
+			free(key);
+			if (feof(stdin))
+				break;
+			perror("getline");
+			exit(1);
+		}
+		if (r > 0 && key[r - 1] == '\n')
+			key[--r] = '\0';
+		if (!r) {
+			free(key);
+			break;
+		}
+
+		char *val = NULL;
+		n = 0;
+		r = 0;
+		while (!r) {
+			printf("Value: ");
+			fflush(stdout);
+			r = getline(&val, &n, stdin);
+			if (r <= 0) {
+				free(key);
+				free(val);
+				if (feof(stdin))
+					break;
+				perror("getline");
+				exit(1);
+			}
+			if (r > 0 && val[r - 1] == '\n')
+				val[--r] = '\0';
+		}
+
+		void *old = hashtable_get(&tbl, key);
+		r = hashtable_set(&tbl, key, val);
+		if (r < 0) {
+			fprintf(stderr, "hashtable_set: %s\n", strerror(-r));
+			exit(1);
+		}
+		if (old) {
+			free(old);
+			free(key); /* old key was kept */
+		}
+
+		print_stats(&tbl, print_keyval);
+		printf("************************************\n");
+	}
+	puts("");
+	print_stats(&tbl, print_keyval);
+
+	hashtable_iterate(&tbl, free_keyval);
+	hashtable_free(&tbl);
 	return 0;
 }
