@@ -587,11 +587,42 @@ static void print_dot(struct rb_node *node, char *argv[], bool wait_cmd)
 	}
 }
 
-int intcmp(const struct rb_node *new, const struct rb_node *old)
+static int intcmp(const struct rb_node *new, const struct rb_node *old)
 {
 	long n = ((const struct num *)new)->val;
 	long o = ((const struct num *)old)->val;
 	return n < o ? -1 : (n == o ? 0 : 1);
+}
+
+static long read_long()
+{
+	long val = 0;
+	char *line = NULL;
+	size_t n = 0;
+	for (;;) {
+		fprintf(stderr, "Number: ");
+		fflush(stderr);
+		ssize_t r = getline(&line, &n, stdin);
+		if (r <= 0) {
+			if (feof(stdin))
+				break;
+			perror("getline");
+			exit(1);
+		}
+		if (line[r - 1] == '\n')
+			line[--r] = '\0';
+		if (!r)
+			continue;
+
+		errno = 0;
+		char *endptr;
+		val = strtol(line, &endptr, 10);
+		if (errno != 0 || *endptr != '\0')
+			continue;
+		break;
+	}
+	free(line);
+	return val;
 }
 
 int main(int argc, char *argv[])
@@ -602,7 +633,7 @@ int main(int argc, char *argv[])
 	char *line = NULL;
 	size_t n = 0;
 	for (;;) {
-		fprintf(stderr, "Enter number (none to finish): ");
+		fprintf(stderr, "Command [i-insert, d-delete, p-print, none-finish]: ");
 		fflush(stderr);
 		ssize_t r = getline(&line, &n, stdin);
 		if (r <= 0) {
@@ -615,55 +646,36 @@ int main(int argc, char *argv[])
 			line[--r] = '\0';
 		if (!r)
 			break;
-
-		errno = 0;
-		char *endptr;
-		long val = strtol(line, &endptr, 10);
-		if (errno != 0 || *endptr != '\0')
+		if (r > 1)
 			continue;
 
-		struct num *num = calloc(1, sizeof(*num));
-		if (!num) {
-			perror("calloc");
-			exit(1);
-		}
-		num->val = val;
-		rb_insert(&tree, &num->node, intcmp);
-		print_dot(tree.root, &argv[1], false);
-	}
-
-	for (;;) {
-		fprintf(stderr, "Delete number (none to finish): ");
-		fflush(stderr);
-		ssize_t r = getline(&line, &n, stdin);
-		if (r <= 0) {
+		char cmd = line[0];
+		if (cmd == 'i') {
+			long val = read_long();
 			if (feof(stdin))
 				break;
-			perror("getline");
-			exit(1);
-		}
-		if (line[r - 1] == '\n')
-			line[--r] = '\0';
-		if (!r)
-			break;
-
-		errno = 0;
-		char *endptr;
-		long val = strtol(line, &endptr, 10);
-		if (errno != 0 || *endptr != '\0')
-			continue;
-
-		struct num dummy = {
-			.val = val
-		};
-		struct rb_node *node = rb_find(&tree, &dummy.node, intcmp);
-		if (!node) {
-			fprintf(stderr, "Not found\n");
-			continue;
-		}
-		rb_delete(&tree, node);
-		free(node);
-		print_dot(tree.root, &argv[1], false);
+			struct num *num = calloc(1, sizeof(*num));
+			if (!num) {
+				perror("calloc");
+				exit(1);
+			}
+			num->val = val;
+			rb_insert(&tree, &num->node, intcmp);
+		} else if (cmd == 'd') {
+			long val = read_long();
+			if (feof(stdin))
+				break;
+			struct num dummy = {
+				.val = val
+			};
+			struct rb_node *node = rb_find(&tree, &dummy.node, intcmp);
+			if (node) {
+				rb_delete(&tree, node);
+				free(node);
+			} else
+				fprintf(stderr, "Not found\n");
+		} else if (cmd == 'p')
+			print_dot(tree.root, &argv[1], false);
 	}
 	free(line);
 	rb_preorder(tree.root, (void (*)(struct rb_node *))free);
