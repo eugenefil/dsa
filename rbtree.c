@@ -123,7 +123,7 @@ static void rb_insert(struct rb_tree *tree, struct rb_node *node,
 				 * make siblings black and grandparent red.
 				 * Continue tree checking with grandparent.
 				 *
-				 * (uppercase is black, [] denote current node)
+				 * (uppercase is black, [] - current node)
 				 *      G          [g]
 				 *     / \         / \
 				 *    p   u -->   P   U
@@ -199,15 +199,292 @@ static void rb_insert(struct rb_tree *tree, struct rb_node *node,
 	tree->root->red = 0;
 }
 
+static struct rb_node *rb_find(struct rb_tree *tree, const struct rb_node *node,
+	int (*cmp)(const struct rb_node *n1, const struct rb_node *n2))
+{
+	struct rb_node *nil = &tree->nil;
+	struct rb_node *n = tree->root;
+	while (n != nil) {
+		int ret = cmp(node, n);
+		if (!ret)
+			return n;
+		else if (ret < 0)
+			n = n->left;
+		else
+			n = n->right;
+	}
+	return NULL;
+}
+
+static void rb_replace(struct rb_tree *tree, struct rb_node *what,
+			  struct rb_node *with)
+{
+	if (what == tree->root)
+		tree->root = with;
+	else if (what == what->parent->left)
+		what->parent->left = with;
+	else
+		what->parent->right = with;
+	/*
+	 * Even if replacement node (aka "with" node) is nil, delete
+	 * fixup depends on its parent being correctly set below.
+	 * That's why we have to use sentinel nil instead of NULL.
+	 */
+	with->parent = what->parent;
+}
+
+static void rb_delete(struct rb_tree *tree, struct rb_node *node)
+{
+	/* Save original color of the deleted node to later determine
+	 * whether we need to restore red-black properties.
+	 */
+	int orig_red = node->red;
+	/*
+	 * After a black node is deleted, a node that takes its place is
+	 * viewed as carrying an extra black. If the latter is black itself,
+	 * it becomes doubly black, otherwise red-and-black. The point of
+	 * the follow-up fixup is to remove that extra black.
+	 */
+	struct rb_node *extra;
+	struct rb_node *nil = &tree->nil;
+	if (node->left == nil) {
+		extra = node->right;
+		rb_replace(tree, node, node->right);
+	} else if (node->right == nil) {
+		extra = node->left;
+		rb_replace(tree, node, node->left);
+	} else {
+		/* Find node's successor - the smallest node to the right of it.
+		 * It's either node's immediate right or the lowest left
+		 * descendant of immediate right. Either way successor has
+		 * no left, b/c it's the smallest.
+		 */
+		struct rb_node *next = node->right;
+		while (next->left != nil)
+			next = next->left;
+		/*
+		 * Successor will take deleted node's place and color, so
+		 * effectively it's successor which is deleted. Thus save
+		 * its original color.
+		 */
+		orig_red = next->red;
+		/* Successor has no left, so after its effective deletion
+		 * the (possible) extra black is carried by successor's right,
+		 * which can be nil.
+		 */
+		extra = next->right;
+
+		if (next != node->right) {
+			/*
+			 * If successor is not immediate right, but a lowest
+			 * left descendant of it, then delete it from its place
+			 * by replacing with its right. Now successor has
+			 * neither left nor right. Attach node's right to it.
+			 * Note, if successor's right were nil, replacing would
+			 * set proper parent on the sentinel node - needed by
+			 * the follow-up delete fixup.
+			 *
+			 * (X carries extra black after successor deletion)
+			 *   N           N
+			 *  / \         / \
+			 * L   R       L   S
+			 *    / \  -->      \
+			 *   1   2           R
+			 *  / \             / \
+			 * S   3           1   2
+			 *  \             / \
+			 *   X           X   3
+			 */
+			rb_replace(tree, next, next->right);
+			next->right = node->right;
+			node->right->parent = next;
+		} else {
+			/*
+			 * Successor is node's immediate right. After successor
+			 * replaces the node, successor's right will carry the
+			 * extra black. Successor's right can be nil, so make
+			 * sure sentinels's parent is set up properly - needed
+			 * by the follow-up fixup.
+			 *
+			 *   N
+			 *  / \
+			 * L   S
+			 *      \
+			 *       X
+			 */
+			extra->parent = next;
+		}
+
+		rb_replace(tree, node, next);
+		next->left = node->left;
+		node->left->parent = next;
+		next->red = node->red;
+	}
+
+	/* Deleting red node does not violate red-black properties:
+	 * black heights are unchanged and can be no red-red conflict.
+	 */
+	if (orig_red)
+		return;
+	
+	/*
+	 * Deleted node was black. If node carrying the extra black is
+	 * red (i.e. it's red-and-black), then no complex fixup is needed -
+	 * just make it simply black to restore the deleted black. This is
+	 * done by the statement after the loop. Loop is skipped.
+	 */
+	while (extra != tree->root && !extra->red) {
+		/* The node carrying the extra black is doubly black. */
+		struct rb_node *parent = extra->parent;
+		if (extra == parent->left) {
+			/* Doubly black's sibling can't be nil - there
+			 * must be at least one black node on paths
+			 * starting from it to match that extra black.
+			 */
+			struct rb_node *sibling = parent->right;
+			if (sibling->red) {
+				/*
+				 * If sibling is red, then its parent and
+				 * children are black. Children can't be nil,
+				 * b/c they have to match the extra black.
+				 * Swap sibling's and parent's colors, then
+				 * rotate parent left, so that new sibling is
+				 * black. B/c it's former sibling's child, new
+				 * sibling is not nil. Black heights are unchanged.
+				 *
+				 * (uppercase is black, <> - sibling)
+				 *   P             S
+				 *  / \           / \
+				 * X  <s>  -->   p   B
+				 *    / \       / \
+				 *   A   B     X  <A>
+				 */
+				sibling->red = 0;
+				parent->red = 1;
+				rb_rotate_left(tree, parent);
+				sibling = parent->right;
+			}
+
+			/* Sibling is black and not nil, but children can be nil. */
+			if (!sibling->left->red && !sibling->right->red) {
+				/*
+				 * Paths through the doubly black node and its
+				 * black sibling have same black heights. If
+				 * sibling's both children are black, decrement
+				 * the heights by making sibling red and pushing
+				 * the extra black from doubly black to parent.
+				 *
+				 * (? - either red or black, {} - extra black)
+				 *    P?                  {P?}
+				 *   / \                  / \
+				 * {X}  S   -->          X   s
+				 *     / \                  / \
+				 *    L   R                L   R
+				 */
+				sibling->red = 1;
+				extra = parent;
+				/*
+				 * If parent is red, it becomes red-and-black.
+				 * The loop then ends and the statement after
+				 * the loop makes parent simply black - removes
+				 * the extra black. Otherwise loop continues to
+				 * push the extra black up to the root.
+				 */
+			} else {
+				/* One or both children of black sibling are red. */
+				if (!sibling->right->red) {
+					/*
+					 * Black sibling's right child is black,
+					 * while left is red and thus not nil.
+					 * Swap sibling's and its left child's
+					 * colors, then rotate sibling right to
+					 * make its left child new black non-nil
+					 * sibling and former sibling - its new
+					 * red non-nil right child.
+					 *
+					 * (? - either red or black, <> - sibling)
+					 *   P?          P?
+					 *  / \         / \
+					 * X  <S>  --> X  <L>
+					 *    / \         / \
+					 *   l   R       1   s
+					 *  / \             / \
+					 * 1   2           2   R
+					 */
+					sibling->red = 1;
+					sibling->left->red = 0;
+					rb_rotate_right(tree, sibling);
+					sibling = parent->right;
+				}
+
+				/* Black sibling's right child is red. Parent
+				 * and left child can be any color. Swap sibling's
+				 * and parent's colors, then rotate parent left to
+				 * become sibling's left black child and thus take
+				 * the extra black from doubly black - make it simply
+				 * black. Make sibling's red right child black to
+				 * compensate for the loss of black parent. Left
+				 * sibling's child retains black parent. Thus
+				 * black heights are left unchanged.
+				 *
+				 * (? - either red or black, {} - extra black)
+				 *    P?            S?
+				 *   / \           / \
+				 * {X}  S   -->   P   R
+				 *     / \       / \
+				 *    L?  r     X   L?
+				 */
+				sibling->red = parent->red;
+				parent->red = 0;
+				sibling->right->red = 0;
+				rb_rotate_left(tree, parent);
+				/* There is no extra black, so finish. */
+				break;
+			}
+		} else {
+			/* Same as above, but with left and right exchanged. */
+			struct rb_node *sibling = parent->left;
+			if (sibling->red) {
+				sibling->red = 0;
+				parent->red = 1;
+				rb_rotate_right(tree, parent);
+				sibling = parent->left;
+			}
+
+			if (!sibling->left->red && !sibling->right->red) {
+				sibling->red = 1;
+				extra = parent;
+			} else {
+				if (!sibling->left->red) {
+					sibling->red = 1;
+					sibling->right->red = 0;
+					rb_rotate_left(tree, sibling);
+					sibling = parent->left;
+				}
+
+				sibling->red = parent->red;
+				parent->red = 0;
+				sibling->left->red = 0;
+				rb_rotate_right(tree, parent);
+				break;
+			}
+		}
+	}
+	extra->red = 0;
+}
+
 static void rb_preorder(struct rb_node *node, void (*fn)(struct rb_node *))
 {
 	if (RB_NIL(node))
 		return;
+	/* fn may be free(3), so get left and right before calling it */
+	struct rb_node *l = node->left;
+	struct rb_node *r = node->right;
 	fn(node);
-	if (!RB_NIL(node->left))
-		rb_preorder(node->left, fn);
-	if (!RB_NIL(node->right))
-		rb_preorder(node->right, fn);
+	if (!RB_NIL(l))
+		rb_preorder(l, fn);
+	if (!RB_NIL(r))
+		rb_preorder(r, fn);
 }
 
 struct num {
@@ -354,6 +631,41 @@ int main(int argc, char *argv[])
 		rb_insert(&tree, &num->node, intcmp);
 		print_dot(tree.root, &argv[1], false);
 	}
+
+	for (;;) {
+		fprintf(stderr, "Delete number (none to finish): ");
+		fflush(stderr);
+		ssize_t r = getline(&line, &n, stdin);
+		if (r <= 0) {
+			if (feof(stdin))
+				break;
+			perror("getline");
+			exit(1);
+		}
+		if (line[r - 1] == '\n')
+			line[--r] = '\0';
+		if (!r)
+			break;
+
+		errno = 0;
+		char *endptr;
+		long val = strtol(line, &endptr, 10);
+		if (errno != 0 || *endptr != '\0')
+			continue;
+
+		struct num dummy = {
+			.val = val
+		};
+		struct rb_node *node = rb_find(&tree, &dummy.node, intcmp);
+		if (!node) {
+			fprintf(stderr, "Not found\n");
+			continue;
+		}
+		rb_delete(&tree, node);
+		free(node);
+		print_dot(tree.root, &argv[1], false);
+	}
 	free(line);
+	rb_preorder(tree.root, (void (*)(struct rb_node *))free);
 	return 0;
 }
