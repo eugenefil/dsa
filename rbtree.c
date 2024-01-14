@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <signal.h>
 #include <string.h>
+#include <time.h>
+#include <math.h>
 
 struct rb_node {
 	struct rb_node *parent;
@@ -487,6 +489,15 @@ static void rb_preorder(struct rb_node *node, void (*fn)(struct rb_node *))
 		rb_preorder(r, fn);
 }
 
+static int rb_height(struct rb_node *node)
+{
+	if (RB_NIL(node))
+		return 0;
+	int lh = 1 + rb_height(node->left);
+	int rh = 1 + rb_height(node->right);
+	return lh > rh ? lh : rh;
+}
+
 struct num {
 	struct rb_node node;
 	long val;
@@ -587,11 +598,121 @@ static void print_dot(struct rb_node *node, char *argv[], bool wait_cmd)
 	}
 }
 
-static int intcmp(const struct rb_node *new, const struct rb_node *old)
+static int numcmp(const struct rb_node *new, const struct rb_node *old)
 {
 	long n = ((const struct num *)new)->val;
 	long o = ((const struct num *)old)->val;
 	return n < o ? -1 : (n == o ? 0 : 1);
+}
+
+static int intcmp(const void *p1, const void *p2)
+{
+	int n1 = *(int *)p1;
+	int n2 = *(int *)p2;
+	return n1 < n2 ? -1 : (n1 == n2 ? 0 : 1);
+}
+
+#define NUM_TREES 1000
+#define NUM_NODES 1024
+static void test(size_t num_trees, size_t num_nodes, char *argv[])
+{
+	if (num_trees <= 0)
+		num_trees = NUM_TREES;
+	if (num_nodes <= 0)
+		num_nodes = NUM_NODES;
+
+	srandom(time(NULL));
+	printf("build %zu random trees of %zu nodes\n", num_trees, num_nodes);
+
+	int nH = 0;
+	int heights[num_trees];
+	struct num nums[num_nodes];
+	for (int i = 0; i < num_trees; ++i) {
+		memset(nums, 0, sizeof(nums));
+		struct rb_tree tree;
+		rb_init(&tree);
+		for (int j = 0; j < num_nodes; ++j) {
+			nums[j].val = random();
+			rb_insert(&tree, &nums[j].node, numcmp);
+		}
+		heights[i] = rb_height(tree.root);
+
+		int nh = 0;
+		for (int j = 0; j < num_nodes; ++j) {
+			struct rb_node *node = &nums[j].node;
+			while (!RB_NIL(node)) {
+				++nh;
+				node = node->parent;
+			}
+		}
+		if (argv[0]) {
+			printf("%d: height %d\n", i, heights[i]);
+			printf("%d: avg node height %.2f\n", i, (float)nh / num_nodes);
+			print_dot(tree.root, argv, true);
+		}
+		nH += nh;
+	}
+
+	qsort(heights, num_trees, sizeof(int), intcmp);
+	printf("min height %d\n", heights[0]);
+	printf("max height %d\n", heights[num_trees - 1]);
+	printf("median height %d\n", heights[num_trees / 2]);
+	int H = 0;
+	for (int i = 0; i < num_trees; ++i)
+		H += heights[i];
+	printf("avg height %.2f\n", (float)H / num_trees);
+	printf("avg node height %.2f\n", (float)nH / (num_trees * num_nodes));
+	printf("log2(%zu) %.2f\n", num_nodes, log2f(num_nodes));
+}
+
+static char *argv0;
+static void usage()
+{
+	printf("\
+Usage: %s [OPTION] [CMD [ARGS]...]\n\
+Populate red-black tree, print its graphviz dot script to stdout.\n\
+If given, run CMD with ARGS and pipe dot script to it.\n\
+\n\
+  -test[=NUM_TREES,NUM_NODES]    create random trees and\n\
+                                 print their statistics\n", argv0);
+}
+
+static void parse_args(int argc, char *argv[])
+{
+	argv0 = argv[0];
+	if (argc == 2 && !strcmp(argv[1], "-h")) {
+		usage(argv[0]);
+		exit(0);
+	} else if (argc >= 2 && !strncmp(argv[1], "-test", 5)) {
+		unsigned long num_trees = 0;
+		unsigned long num_nodes = 0;
+		if (strlen(argv[1]) > 5) {
+			char *s = argv[1] + 5;
+			if (*s != '=') {
+				usage(argv[0]);
+				exit(1);
+			}
+			++s;
+
+			char *endptr;
+			errno = 0;
+			num_trees = strtoul(s, &endptr, 10);
+			if (errno != 0 || endptr == s || *endptr != ',') {
+				usage(argv[0]);
+				exit(1);
+			}
+			s = endptr + 1;
+
+			errno = 0;
+			num_nodes = strtoul(s, &endptr, 10);
+			if (errno != 0 || endptr == s || *endptr != '\0') {
+				usage(argv[0]);
+				exit(1);
+			}
+		}
+		test(num_trees, num_nodes, &argv[2]);
+		exit(0);
+	}
 }
 
 static long read_long()
@@ -627,6 +748,8 @@ static long read_long()
 
 int main(int argc, char *argv[])
 {
+	parse_args(argc, argv);
+
 	struct rb_tree tree;
 	rb_init(&tree);
 
@@ -660,7 +783,7 @@ int main(int argc, char *argv[])
 				exit(1);
 			}
 			num->val = val;
-			rb_insert(&tree, &num->node, intcmp);
+			rb_insert(&tree, &num->node, numcmp);
 		} else if (cmd == 'd') {
 			long val = read_long();
 			if (feof(stdin))
@@ -668,7 +791,7 @@ int main(int argc, char *argv[])
 			struct num dummy = {
 				.val = val
 			};
-			struct rb_node *node = rb_find(&tree, &dummy.node, intcmp);
+			struct rb_node *node = rb_find(&tree, &dummy.node, numcmp);
 			if (node) {
 				rb_delete(&tree, node);
 				free(node);
