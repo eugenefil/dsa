@@ -23,7 +23,7 @@ struct bst_root {
 };
 
 static void bst_insert(struct bst_root *root, struct bst_node *node,
-		       int (*cmp)(struct bst_node *new, struct bst_node *old))
+	 int (*cmp)(const struct bst_node *new, const struct bst_node *old))
 {
 	struct bst_node *n = root->node;
 	struct bst_node *parent = NULL;
@@ -47,7 +47,7 @@ static void bst_insert(struct bst_root *root, struct bst_node *node,
 }
 
 static struct bst_node *bst_find(struct bst_root *root, struct bst_node *node,
-				 int (*cmp)(struct bst_node *n1, struct bst_node *n2))
+	 int (*cmp)(const struct bst_node *n1, const struct bst_node *n2))
 {
 	struct bst_node *n = root->node;
 	while (n) {
@@ -148,7 +148,7 @@ struct num {
 	long val;
 };
 
-static int num_cmp(struct bst_node *new, struct bst_node *old)
+static int numcmp(const struct bst_node *new, const struct bst_node *old)
 {
 	long n = ((struct num *)new)->val;
 	long o = ((struct num *)old)->val;
@@ -251,7 +251,7 @@ static void print_dot(struct bst_node *node, char *argv[], bool wait_cmd)
 	}
 }
 
-int intcmp(const void *p1, const void *p2)
+static int intcmp(const void *p1, const void *p2)
 {
 	int n1 = *(int *)p1;
 	int n2 = *(int *)p2;
@@ -292,7 +292,7 @@ static void test(int n, int bst_size, char *argv[])
 		memset(nums, 0, bst_size * sizeof(*nums));
 		for (int j = 0; j < bst_size; ++j) {
 			nums[j].val = random();
-			bst_insert(&root, &nums[j].node, num_cmp);
+			bst_insert(&root, &nums[j].node, numcmp);
 		}
 		h[i] = bst_height(root.node);
 		for (int j = 0; j < bst_size; ++j) {
@@ -325,7 +325,7 @@ static void test(int n, int bst_size, char *argv[])
 	free(h);
 }
 
-void usage(const char *prog)
+static void usage(const char *prog)
 {
 	printf("\
 Usage: %s [OPTION] [CMD [ARGS]...]\n\
@@ -406,7 +406,7 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 		num->val = val;
-		bst_insert(&root, &num->node, num_cmp);
+		bst_insert(&root, &num->node, numcmp);
 		print_dot(root.node, &argv[1], false);
 	}
 
@@ -431,7 +431,7 @@ int main(int argc, char *argv[])
 		if (errno < 0 || *endptr != '\0')
 			continue;
 		
-		num = (struct num *)bst_find(&root, &dummy.node, num_cmp);
+		num = (struct num *)bst_find(&root, &dummy.node, numcmp);
 		if (!num) {
 			fprintf(stderr, "Number not found\n");
 			continue;
