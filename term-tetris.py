@@ -8,7 +8,9 @@ import atexit
 
 TARGET_FPS = 60
 FRAME_TIME = 1 / TARGET_FPS
-MOVE_TIME = 1
+MOVE_TIMEOUT = 1
+NEW_PIECE_TIMEOUT = 0.100
+SPEEDUP_TIMEOUT = FRAME_TIME
 
 PIECES = [
     # I
@@ -180,10 +182,11 @@ class Tetris:
 
         self.top = top + rows // 2 - self.total_rows // 2
         self.left = left + cols // 2 - self.total_cols // 2
-
-        self.time_to_move = MOVE_TIME
         self.grid = [[None] * self.cols for _ in range(self.rows)]
+
         self.new_piece()
+        self.state = self.process_move
+        self.time_to_move = MOVE_TIMEOUT
 
     def new_piece(self):
         sprites = random.choice(PIECES)
@@ -195,6 +198,7 @@ class Tetris:
             'x': self.cols // 2 - width // 2,
             'y': 0,
         }
+        self.speedup_time = 0
 
     def check_collision(self):
         sprite = self.piece['sprites'][self.piece['sprite_idx']]
@@ -211,7 +215,7 @@ class Tetris:
                     return True
         return False
 
-    def consume_blocks(self):
+    def consume_piece(self):
         sprite = self.piece['sprites'][self.piece['sprite_idx']]
         x0, y0 = self.piece['x'], self.piece['y']
         for r, cols in enumerate(sprite):
@@ -223,17 +227,34 @@ class Tetris:
                 assert self.grid[y][x] is None
                 self.grid[y][x] = self.piece['color']
 
-    def update(self, dt, keys):
+    def process_wait_for_new_piece(self, dt, keys):
+        self.time_to_new_piece -= dt
+        if self.time_to_new_piece > 0:
+            return True
+
+        self.consume_piece()
+        self.new_piece()
+        if self.check_collision():
+            return False
+
+        self.state = self.process_move
+        self.time_to_move = MOVE_TIMEOUT
+        return True
+
+    def process_move(self, dt, keys):
+        if self.speedup_time > 0:
+            self.speedup_time -= dt
+            dt *= 40
+
         self.time_to_move -= dt
         if self.time_to_move <= 0:
-            self.time_to_move += MOVE_TIME
+            self.time_to_move += MOVE_TIMEOUT
             self.piece['y'] += 1 # descend
             if self.check_collision():
                 self.piece['y'] -= 1 # collision, revert
-                self.consume_blocks()
-                self.new_piece()
-                if self.check_collision():
-                    return False
+                self.state = self.process_wait_for_new_piece
+                self.time_to_new_piece = NEW_PIECE_TIMEOUT
+                return True
 
         for key in keys:
             if key == 'left':
@@ -250,7 +271,12 @@ class Tetris:
                 self.piece['sprite_idx'] %= len(self.piece['sprites'])
                 if self.check_collision():
                     self.piece['sprite_idx'] = orig
+            elif key == 'down':
+                self.speedup_time = SPEEDUP_TIMEOUT
         return True
+
+    def update(self, dt, keys):
+        return self.state(dt, keys)
 
     def draw(self):
         # top border
