@@ -14,10 +14,6 @@ SPEEDUP_TIMEOUT = FRAME_TIME
 REMOVE_FILLED_TIMEOUT = NEW_PIECE_TIMEOUT * 2
 IDLE_TIMEOUT = 1
 
-MINROWS = 4
-MAXROWS = 20
-MINCOLS = 4
-MAXCOLS = 10
 BORDER_COLOR = 47
 FILLED_COLOR = 41
 EMPTY_COLOR = 40
@@ -167,47 +163,80 @@ def flush():
 def output(text):
     print(text, end='')
 
-def output_color(text, fg=39, bg=49):
-    print(f'\x1b[{fg};{bg}m' + text + '\x1b[0m', end='')
+def output_color(text, fg=39, bg=49, bold=False):
+    bold = ';1' if bold else ''
+    print(f'\x1b[{fg};{bg}{bold}m' + text + '\x1b[0m', end='')
 
 class Tetris:
+    BORDERS = 2
+    MAX_SPRITE_HEIGHT = 4
+    MAX_SPRITE_WIDTH = 4
+    GAMEINFO_ROWS = (
+        2 + # score caption + value
+        2 + # level caption + value
+        2 + # lines caption + value
+        4 # next caption + sprite 0 effective max height (3)
+    )
+    GAMEINFO_COLS = 5 # max caption width (score, level, lines)
+
+    # game info and playing field share terminal rows
+    MIN_FIELD_ROWS = max(MAX_SPRITE_HEIGHT, GAMEINFO_ROWS)
+    MAX_FIELD_ROWS = 20
+    assert MAX_FIELD_ROWS >= MIN_FIELD_ROWS
+    MIN_ROWS = MIN_FIELD_ROWS + BORDERS
+
+    # game info, borders and playing field occupy separate terminal columns
+    NON_FIELD_COLS = BORDERS + GAMEINFO_COLS
+    MIN_FIELD_COLS = MAX_SPRITE_WIDTH
+    MAX_FIELD_COLS = 10
+    assert MAX_FIELD_COLS >= MIN_FIELD_COLS
+    MIN_COLS = MIN_FIELD_COLS + NON_FIELD_COLS
+
     def __init__(self, screen_rect):
         top, left, rows, cols = screen_rect
-        self.rows = rows - 2
-        if self.rows < MINROWS:
+        if rows < self.MIN_ROWS:
             raise ValueError('not enough terminal rows')
-        self.rows = min(self.rows, MAXROWS)
-        self.total_rows = self.rows + 2 # playing field + borders
+        self.field_rows = rows - self.BORDERS
+        self.field_rows = min(self.field_rows, self.MAX_FIELD_ROWS)
+        self.rows = self.field_rows + self.BORDERS
 
-        self.cols = cols - 2
-        if self.cols < MINCOLS:
+        if cols < self.MIN_COLS:
             raise ValueError('not enough terminal columns')
-        self.cols = min(self.cols, MAXCOLS)
-        self.total_cols = self.cols + 2 # playing field + borders
+        self.field_cols = cols - self.NON_FIELD_COLS
+        self.field_cols = min(self.field_cols, self.MAX_FIELD_COLS)
+        self.border_cols = self.field_cols + self.BORDERS
+        self.cols = self.field_cols + self.NON_FIELD_COLS
 
-        self.top = top + rows // 2 - self.total_rows // 2
-        self.left = left + cols // 2 - self.total_cols // 2
-        self.grid = [[None] * self.cols for _ in range(self.rows)]
+        self.top = top + rows // 2 - self.rows // 2
+        self.left = left + cols // 2 - self.cols // 2
+        self.field_top = self.top + self.BORDERS // 2
+        self.field_left = self.left + self.BORDERS // 2
+        self.gameinfo_top = (self.field_top + self.field_rows // 2 -
+            self.GAMEINFO_ROWS // 2)
+        self.gameinfo_left = self.left + self.border_cols
+
+        self.grid = [[None] * self.field_cols for _ in range(self.field_rows)]
         self.message = None # overlay message like 'game over'
+        self.score = 0
+        self.level = 1
+        self.lines = 0
 
-        self.new_piece()
-        self.state = self.process_move
-        self.time_to_move = MOVE_TIMEOUT
+        self.next_piece = self.new_piece()
+        self.make_new_piece()
 
     def new_piece(self):
         sprites = random.choice(PIECES)
         width = len(sprites[0][0])
         height = len(sprites[0])
-        self.piece =  {
+        return {
             'color': random.choice(range(41, 47)),
             'sprites': sprites,
             'sprite_idx': 0,
-            'x': self.cols // 2 - width // 2,
+            'x': self.field_cols // 2 - width // 2,
             'y': 0,
             'width': width,
             'height': height,
         }
-        self.speedup_time = 0
 
     def check_collision(self):
         sprite = self.piece['sprites'][self.piece['sprite_idx']]
@@ -218,7 +247,7 @@ class Tetris:
                     continue
                 x = x0 + c
                 y = y0 + r
-                if x < 0 or x >= self.cols or y < 0 or y >= self.rows:
+                if x < 0 or x >= self.field_cols or y < 0 or y >= self.field_rows:
                     return True
                 if self.grid[y][x]:
                     return True
@@ -244,7 +273,9 @@ class Tetris:
         return len(keys) == 0 # exit on any key
 
     def make_new_piece(self):
-        self.new_piece()
+        self.speedup_time = 0
+        self.piece = self.next_piece
+        self.next_piece = self.new_piece()
         if self.check_collision():
             self.message = 'game over'
             self.state = self.process_idle
@@ -263,7 +294,7 @@ class Tetris:
 
     def check_filled_rows(self, y0, height):
         self.filled_rows = []
-        for y in range(y0, min(y0 + height, self.rows)):
+        for y in range(y0, min(y0 + height, self.field_rows)):
             filled = True
             for block in self.grid[y]:
                 if block is None:
@@ -275,7 +306,7 @@ class Tetris:
 
     def paint_filled_rows(self, color):
         for y in self.filled_rows:
-            self.grid[y] = [color] * self.cols
+            self.grid[y] = [color] * self.field_cols
 
     def process_remove_filled(self, dt, keys):
         self.remove_filled_time -= dt
@@ -285,14 +316,17 @@ class Tetris:
         assert len(self.filled_rows) > 0
         for y in reversed(self.filled_rows):
             self.grid.pop(y)
+            self.lines += 1
+            self.score += 100
         for _ in self.filled_rows:
-            self.grid.insert(0, [None] * self.cols)
+            self.grid.insert(0, [None] * self.field_cols)
         self.filled_rows = []
         return self.make_new_piece()
 
     def process_move(self, dt, keys):
         if self.speedup_time > 0:
             self.speedup_time -= dt
+            self.score += 1
             dt *= 40
 
         self.time_to_move -= dt
@@ -334,25 +368,34 @@ class Tetris:
     def update(self, dt, keys):
         return self.state(dt, keys)
 
+    def draw_piece(self, x0, y0, piece):
+        sprite = piece['sprites'][piece['sprite_idx']]
+        for r, cols in enumerate(sprite):
+            for c, filled in enumerate(cols):
+                if not filled:
+                    continue
+                move_cursor(y0 + r, x0 + c)
+                print_border(1, piece['color'])
+
     def draw(self):
         # top border
         move_cursor(self.top, self.left)
-        print_border(self.total_cols, BORDER_COLOR)
-        for r in range(self.rows):
+        print_border(self.border_cols, BORDER_COLOR)
+        for r in range(self.field_rows):
             # left border
-            move_cursor(self.top + 1 + r, self.left)
+            move_cursor(self.field_top + r, self.left)
             print_border(1, BORDER_COLOR)
             # right border
-            move_cursor(self.top + 1 + r, self.left + 1 + self.cols)
+            move_cursor(self.field_top + r, self.field_left + self.field_cols)
             print_border(1, BORDER_COLOR)
         # bottom border
-        move_cursor(self.top + 1 + self.rows, self.left)
-        print_border(self.total_cols, BORDER_COLOR)
+        move_cursor(self.field_top + self.field_rows, self.left)
+        print_border(self.border_cols, BORDER_COLOR)
 
         if self.state != self.process_pause:
             # playing field
-            for r in range(self.rows):
-                move_cursor(self.top + 1 + r, self.left + 1)
+            for r in range(self.field_rows):
+                move_cursor(self.field_top + r, self.field_left)
                 for color in self.grid[r]:
                     if color:
                         print_border(1, color)
@@ -361,27 +404,41 @@ class Tetris:
 
             # piece
             if self.piece:
-                sprite = self.piece['sprites'][self.piece['sprite_idx']]
-                x0, y0 = self.piece['x'], self.piece['y']
-                for r, cols in enumerate(sprite):
-                    for c, filled in enumerate(cols):
-                        if not filled:
-                            continue
-                        move_cursor(self.top + 1 + y0 + r, self.left + 1 + x0 + c)
-                        print_border(1, self.piece['color'])
+                x0 = self.field_left + self.piece['x']
+                y0 = self.field_top + self.piece['y']
+                self.draw_piece(x0, y0, self.piece)
+
+            # game info
+            x0 = self.gameinfo_left
+            y0 = self.gameinfo_top
+            move_cursor(y0, x0)
+            output_color('SCORE', bold=True)
+            move_cursor(y0 + 1, x0)
+            output_color(f'{self.score:^{self.GAMEINFO_COLS}}', bold=True)
+            move_cursor(y0 + 2, x0)
+            output_color('LEVEL', bold=True)
+            move_cursor(y0 + 3, x0)
+            output_color(f'{self.level:^{self.GAMEINFO_COLS}}', bold=True)
+            move_cursor(y0 + 4, x0)
+            output_color('LINES', bold=True)
+            move_cursor(y0 + 5, x0)
+            output_color(f'{self.lines:^{self.GAMEINFO_COLS}}', bold=True)
+            move_cursor(y0 + 6, x0)
+            output_color('NEXT', bold=True)
+            self.draw_piece(x0 + 1, y0 + 7, self.next_piece)
 
         # message
         if self.message:
-            y0, x0 = self.rows // 2 - 1, self.cols // 2 - 2
+            y0, x0 = self.field_rows // 2 - 1, self.field_cols // 2 - 2
             assert y0 >= 0
             assert x0 >= 0
             if self.message == 'game over':
-                move_cursor(self.top + 1 + y0, self.left + 1 + x0)
+                move_cursor(self.field_top + y0, self.field_left + x0)
                 output_color('GAME', MESSAGE_COLOR, EMPTY_COLOR)
-                move_cursor(self.top + 1 + y0 + 1, self.left + 1 + x0)
+                move_cursor(self.field_top + y0 + 1, self.field_left + x0)
                 output_color('OVER', MESSAGE_COLOR, EMPTY_COLOR)
             elif self.message == 'pause':
-                move_cursor(self.top + 1 + y0, self.left + 1 + x0)
+                move_cursor(self.field_top + y0, self.field_left + x0)
                 output_color('PAUSE', MESSAGE_COLOR, EMPTY_COLOR)
             else:
                 assert 0
