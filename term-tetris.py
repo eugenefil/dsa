@@ -11,7 +11,14 @@ FRAME_TIME = 1 / TARGET_FPS
 MOVE_TIMEOUT = 1
 NEW_PIECE_TIMEOUT = 0.100
 SPEEDUP_TIMEOUT = FRAME_TIME
-SCORE_EFFECT_TIMEOUT = NEW_PIECE_TIMEOUT
+REMOVE_FILLED_TIMEOUT = NEW_PIECE_TIMEOUT * 2
+
+MINROWS = 4
+MAXROWS = 20
+MINCOLS = 4
+MAXCOLS = 10
+BORDER_COLOR = 47
+FILLED_COLOR = 41
 
 PIECES = [
     # I
@@ -142,12 +149,6 @@ PIECES = [
       [0, 1, 0]]],
 ]
 
-MINROWS = 4
-MAXROWS = 20
-MINCOLS = 4
-MAXCOLS = 10
-BORDER_COLOR = 47
-
 def clear():
     print('\x1b[2J', end='')
 
@@ -248,7 +249,7 @@ class Tetris:
         return self.make_new_piece()
 
     def check_filled_rows(self, y0, height):
-        self.filled = []
+        self.filled_rows = []
         for y in range(y0, min(y0 + height, self.rows)):
             filled = True
             for block in self.grid[y]:
@@ -256,20 +257,24 @@ class Tetris:
                     filled = False
                     break
             if filled:
-                self.filled.append(y)
-        return len(self.filled) > 0
+                self.filled_rows.append(y)
+        return len(self.filled_rows) > 0
 
-    def process_score_effect(self, dt, keys):
-        self.score_effect_time -= dt
-        if self.score_effect_time > 0:
+    def paint_filled_rows(self, color):
+        for y in self.filled_rows:
+            self.grid[y] = [color] * self.cols
+
+    def process_remove_filled(self, dt, keys):
+        self.remove_filled_time -= dt
+        if self.remove_filled_time > 0:
             return True
 
-        assert len(self.filled) > 0
-        for y in reversed(self.filled):
+        assert len(self.filled_rows) > 0
+        for y in reversed(self.filled_rows):
             self.grid.pop(y)
-        for _ in self.filled:
+        for _ in self.filled_rows:
             self.grid.insert(0, [None] * self.cols)
-        self.filled = []
+        self.filled_rows = []
         return self.make_new_piece()
 
     def process_move(self, dt, keys):
@@ -285,10 +290,10 @@ class Tetris:
                 self.piece['y'] -= 1 # collision, revert
                 y0, height = self.piece['y'], self.piece['height']
                 self.consume_piece()
-                print(y0, height, len(self.grid))
                 if self.check_filled_rows(y0, height):
-                    self.state = self.process_score_effect
-                    self.score_effect_time = SCORE_EFFECT_TIMEOUT
+                    self.paint_filled_rows(FILLED_COLOR)
+                    self.state = self.process_remove_filled
+                    self.remove_filled_time = REMOVE_FILLED_TIMEOUT
                 else:
                     self.state = self.process_wait_for_new_piece
                     self.time_to_new_piece = NEW_PIECE_TIMEOUT
