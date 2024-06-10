@@ -12,6 +12,7 @@ MOVE_TIMEOUT = 1
 NEW_PIECE_TIMEOUT = 0.100
 SPEEDUP_TIMEOUT = FRAME_TIME
 REMOVE_FILLED_TIMEOUT = NEW_PIECE_TIMEOUT * 2
+IDLE_TIMEOUT = 1
 
 MINROWS = 4
 MAXROWS = 20
@@ -19,6 +20,8 @@ MINCOLS = 4
 MAXCOLS = 10
 BORDER_COLOR = 47
 FILLED_COLOR = 41
+EMPTY_COLOR = 40
+MESSAGE_COLOR = 31
 
 PIECES = [
     # I
@@ -185,6 +188,7 @@ class Tetris:
         self.top = top + rows // 2 - self.total_rows // 2
         self.left = left + cols // 2 - self.total_cols // 2
         self.grid = [[None] * self.cols for _ in range(self.rows)]
+        self.message = None # overlay message like 'game over'
 
         self.new_piece()
         self.state = self.process_move
@@ -233,10 +237,19 @@ class Tetris:
                 self.grid[y][x] = self.piece['color']
         self.piece = None
 
+    def process_idle(self, dt, keys):
+        self.idle_time -= dt
+        if self.idle_time > 0:
+            return True
+        return len(keys) == 0 # exit on any key
+
     def make_new_piece(self):
         self.new_piece()
         if self.check_collision():
-            return False
+            self.message = 'game over'
+            self.state = self.process_idle
+            self.idle_time = IDLE_TIMEOUT
+            return True
 
         self.state = self.process_move
         self.time_to_move = MOVE_TIMEOUT
@@ -356,12 +369,24 @@ class Tetris:
                     move_cursor(self.top + 1 + y0 + r, self.left + 1 + x0 + c)
                     print_border(1, self.piece['color'])
 
+        # message
+        if self.message:
+            if self.message == "game over":
+                y0, x0 = self.rows // 2 - 1, self.cols // 2 - 2
+                assert y0 >= 0
+                assert x0 >= 0
+                move_cursor(self.top + 1 + y0, self.left + 1 + x0)
+                output_color('GAME', MESSAGE_COLOR, EMPTY_COLOR)
+                move_cursor(self.top + 1 + y0 + 1, self.left + 1 + x0)
+                output_color('OVER', MESSAGE_COLOR, EMPTY_COLOR)
+
+
     def toggle_pause(self):
         pass
 
 def draw_fps(fps):
     move_cursor(1, 1)
-    output_color('FPS:' + str(fps), 31, BORDER_COLOR)
+    output_color('FPS:' + str(fps), MESSAGE_COLOR, BORDER_COLOR)
 
 def process_input():
     inp = sys.stdin.buffer.read()
