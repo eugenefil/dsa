@@ -408,24 +408,24 @@ class Tetris:
                 y0 = self.field_top + self.piece['y']
                 self.draw_piece(x0, y0, self.piece)
 
-            # game info
-            x0 = self.gameinfo_left
-            y0 = self.gameinfo_top
-            move_cursor(y0, x0)
-            output_color('SCORE', bold=True)
-            move_cursor(y0 + 1, x0)
-            output_color(f'{self.score:^{self.GAMEINFO_COLS}}', bold=True)
-            move_cursor(y0 + 2, x0)
-            output_color('LEVEL', bold=True)
-            move_cursor(y0 + 3, x0)
-            output_color(f'{self.level:^{self.GAMEINFO_COLS}}', bold=True)
-            move_cursor(y0 + 4, x0)
-            output_color('LINES', bold=True)
-            move_cursor(y0 + 5, x0)
-            output_color(f'{self.lines:^{self.GAMEINFO_COLS}}', bold=True)
-            move_cursor(y0 + 6, x0)
-            output_color('NEXT', bold=True)
-            self.draw_piece(x0 + 1, y0 + 7, self.next_piece)
+        # game info
+        x0 = self.gameinfo_left
+        y0 = self.gameinfo_top
+        move_cursor(y0, x0)
+        output_color('SCORE', bold=True)
+        move_cursor(y0 + 1, x0)
+        output_color(f'{self.score:^{self.GAMEINFO_COLS}}', bold=True)
+        move_cursor(y0 + 2, x0)
+        output_color('LEVEL', bold=True)
+        move_cursor(y0 + 3, x0)
+        output_color(f'{self.level:^{self.GAMEINFO_COLS}}', bold=True)
+        move_cursor(y0 + 4, x0)
+        output_color('LINES', bold=True)
+        move_cursor(y0 + 5, x0)
+        output_color(f'{self.lines:^{self.GAMEINFO_COLS}}', bold=True)
+        move_cursor(y0 + 6, x0)
+        output_color('NEXT', bold=True)
+        self.draw_piece(x0 + 1, y0 + 7, self.next_piece)
 
         # message
         if self.message:
