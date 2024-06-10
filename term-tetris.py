@@ -11,6 +11,7 @@ FRAME_TIME = 1 / TARGET_FPS
 MOVE_TIMEOUT = 1
 NEW_PIECE_TIMEOUT = 0.100
 SPEEDUP_TIMEOUT = FRAME_TIME
+SCORE_EFFECT_TIMEOUT = NEW_PIECE_TIMEOUT
 
 PIECES = [
     # I
@@ -191,12 +192,15 @@ class Tetris:
     def new_piece(self):
         sprites = random.choice(PIECES)
         width = len(sprites[0][0])
+        height = len(sprites[0])
         self.piece =  {
             'color': random.choice(range(41, 47)),
             'sprites': sprites,
             'sprite_idx': 0,
             'x': self.cols // 2 - width // 2,
             'y': 0,
+            'width': width,
+            'height': height,
         }
         self.speedup_time = 0
 
@@ -226,13 +230,9 @@ class Tetris:
                 y = y0 + r
                 assert self.grid[y][x] is None
                 self.grid[y][x] = self.piece['color']
+        self.piece = None
 
-    def process_wait_for_new_piece(self, dt, keys):
-        self.time_to_new_piece -= dt
-        if self.time_to_new_piece > 0:
-            return True
-
-        self.consume_piece()
+    def make_new_piece(self):
         self.new_piece()
         if self.check_collision():
             return False
@@ -240,6 +240,37 @@ class Tetris:
         self.state = self.process_move
         self.time_to_move = MOVE_TIMEOUT
         return True
+
+    def process_wait_for_new_piece(self, dt, keys):
+        self.time_to_new_piece -= dt
+        if self.time_to_new_piece > 0:
+            return True
+        return self.make_new_piece()
+
+    def check_filled_rows(self, y0, height):
+        self.filled = []
+        for y in range(y0, min(y0 + height, self.rows)):
+            filled = True
+            for block in self.grid[y]:
+                if block is None:
+                    filled = False
+                    break
+            if filled:
+                self.filled.append(y)
+        return len(self.filled) > 0
+
+    def process_score_effect(self, dt, keys):
+        self.score_effect_time -= dt
+        if self.score_effect_time > 0:
+            return True
+
+        assert len(self.filled) > 0
+        for y in reversed(self.filled):
+            self.grid.pop(y)
+        for _ in self.filled:
+            self.grid.insert(0, [None] * self.cols)
+        self.filled = []
+        return self.make_new_piece()
 
     def process_move(self, dt, keys):
         if self.speedup_time > 0:
@@ -252,8 +283,15 @@ class Tetris:
             self.piece['y'] += 1 # descend
             if self.check_collision():
                 self.piece['y'] -= 1 # collision, revert
-                self.state = self.process_wait_for_new_piece
-                self.time_to_new_piece = NEW_PIECE_TIMEOUT
+                y0, height = self.piece['y'], self.piece['height']
+                self.consume_piece()
+                print(y0, height, len(self.grid))
+                if self.check_filled_rows(y0, height):
+                    self.state = self.process_score_effect
+                    self.score_effect_time = SCORE_EFFECT_TIMEOUT
+                else:
+                    self.state = self.process_wait_for_new_piece
+                    self.time_to_new_piece = NEW_PIECE_TIMEOUT
                 return True
 
         for key in keys:
@@ -303,14 +341,15 @@ class Tetris:
                     output('-')
 
         # piece
-        sprite = self.piece['sprites'][self.piece['sprite_idx']]
-        x0, y0 = self.piece['x'], self.piece['y']
-        for r, cols in enumerate(sprite):
-            for c, filled in enumerate(cols):
-                if not filled:
-                    continue
-                move_cursor(self.top + 1 + y0 + r, self.left + 1 + x0 + c)
-                print_border(1, self.piece['color'])
+        if self.piece:
+            sprite = self.piece['sprites'][self.piece['sprite_idx']]
+            x0, y0 = self.piece['x'], self.piece['y']
+            for r, cols in enumerate(sprite):
+                for c, filled in enumerate(cols):
+                    if not filled:
+                        continue
+                    move_cursor(self.top + 1 + y0 + r, self.left + 1 + x0 + c)
+                    print_border(1, self.piece['color'])
 
     def toggle_pause(self):
         pass
