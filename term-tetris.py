@@ -349,40 +349,55 @@ class Tetris:
         move_cursor(self.top + 1 + self.rows, self.left)
         print_border(self.total_cols, BORDER_COLOR)
 
-        # playing field
-        for r in range(self.rows):
-            move_cursor(self.top + 1 + r, self.left + 1)
-            for color in self.grid[r]:
-                if color:
-                    print_border(1, color)
-                else:
-                    output('-')
+        if self.state != self.process_pause:
+            # playing field
+            for r in range(self.rows):
+                move_cursor(self.top + 1 + r, self.left + 1)
+                for color in self.grid[r]:
+                    if color:
+                        print_border(1, color)
+                    else:
+                        output('-')
 
-        # piece
-        if self.piece:
-            sprite = self.piece['sprites'][self.piece['sprite_idx']]
-            x0, y0 = self.piece['x'], self.piece['y']
-            for r, cols in enumerate(sprite):
-                for c, filled in enumerate(cols):
-                    if not filled:
-                        continue
-                    move_cursor(self.top + 1 + y0 + r, self.left + 1 + x0 + c)
-                    print_border(1, self.piece['color'])
+            # piece
+            if self.piece:
+                sprite = self.piece['sprites'][self.piece['sprite_idx']]
+                x0, y0 = self.piece['x'], self.piece['y']
+                for r, cols in enumerate(sprite):
+                    for c, filled in enumerate(cols):
+                        if not filled:
+                            continue
+                        move_cursor(self.top + 1 + y0 + r, self.left + 1 + x0 + c)
+                        print_border(1, self.piece['color'])
 
         # message
         if self.message:
-            if self.message == "game over":
-                y0, x0 = self.rows // 2 - 1, self.cols // 2 - 2
-                assert y0 >= 0
-                assert x0 >= 0
+            y0, x0 = self.rows // 2 - 1, self.cols // 2 - 2
+            assert y0 >= 0
+            assert x0 >= 0
+            if self.message == 'game over':
                 move_cursor(self.top + 1 + y0, self.left + 1 + x0)
                 output_color('GAME', MESSAGE_COLOR, EMPTY_COLOR)
                 move_cursor(self.top + 1 + y0 + 1, self.left + 1 + x0)
                 output_color('OVER', MESSAGE_COLOR, EMPTY_COLOR)
+            elif self.message == 'pause':
+                move_cursor(self.top + 1 + y0, self.left + 1 + x0)
+                output_color('PAUSE', MESSAGE_COLOR, EMPTY_COLOR)
+            else:
+                assert 0
 
+    def process_pause(self, dt, keys):
+        return True
 
     def toggle_pause(self):
-        pass
+        if self.state != self.process_pause:
+            self.message = 'pause'
+            self.prev_state = self.state
+            self.state = self.process_pause
+        else:
+            self.message = None
+            self.state = self.prev_state
+
 
 def draw_fps(fps):
     move_cursor(1, 1)
