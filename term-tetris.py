@@ -364,6 +364,9 @@ class Tetris:
                     # add point for every block traveled with extra speed
                     self.add_score(1)
 
+                if self.drop:
+                    self.drop_trail.append(self.piece['y'])
+
         # can't navigate if dropping
         if self.drop:
             return True
@@ -387,6 +390,7 @@ class Tetris:
                 self.speedup_time = SPEEDUP_TIMEOUT
             elif key == 'space':
                 self.drop = True
+                self.drop_trail = []
         return True
 
     def update(self, dt, keys):
@@ -446,9 +450,13 @@ class Tetris:
 
             # piece
             if self.piece:
-                x0 = self.field_left + self.piece['x']
-                y0 = self.field_top + self.piece['y']
-                self.draw_piece(x0, y0, self.piece)
+                x = self.field_left + self.piece['x']
+                if self.drop:
+                    # drop trail
+                    for y in self.drop_trail:
+                        self.draw_piece(x, self.field_top + y, self.piece)
+                else:
+                    self.draw_piece(x, self.field_top + self.piece['y'], self.piece)
         else: # pause
             if self.clear_field_for_pause:
                 self.clear_field_for_pause = False
