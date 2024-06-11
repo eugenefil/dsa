@@ -211,10 +211,12 @@ class Tetris:
         self.gameinfo_left = self.left + self.border_cols
 
         self.grid = [[None] * self.field_cols for _ in range(self.field_rows)]
+        self.decoration_drawn = False
         self.message = None # overlay message like 'game over'
         self.score = 0
         self.level = 1
         self.lines = 0
+        self.gameinfo_changed = True
 
         self.next_piece = self.new_piece()
         self.make_new_piece()
@@ -271,6 +273,7 @@ class Tetris:
         self.speedup_time = 0
         self.piece = self.next_piece
         self.next_piece = self.new_piece()
+        self.gameinfo_changed = True
         if self.check_collision():
             self.message = 'game over'
             self.state = self.process_idle
@@ -299,6 +302,14 @@ class Tetris:
                 self.filled_rows.append(y)
         return len(self.filled_rows) > 0
 
+    def add_score(self, increment):
+        self.score += increment
+        self.gameinfo_changed = True
+
+    def add_lines(self, increment):
+        self.lines += increment
+        self.add_score(100 * increment)
+
     def process_remove_filled(self, dt, keys):
         self.remove_filled_time -= dt
         if self.remove_filled_time > 0:
@@ -312,18 +323,17 @@ class Tetris:
         assert len(self.filled_rows) > 0
         for y in reversed(self.filled_rows):
             self.grid.pop(y)
-            self.lines += 1
-            self.score += 100
         for _ in self.filled_rows:
             self.grid.insert(0, [None] * self.field_cols)
+        self.add_lines(len(self.filled_rows))
         self.filled_rows = []
         return self.make_new_piece()
 
     def process_move(self, dt, keys):
         if self.speedup_time > 0:
             self.speedup_time -= dt
-            self.score += 1
             dt *= 40
+            self.add_score(1)
 
         self.time_to_move -= dt
         if self.time_to_move <= 0:
@@ -373,19 +383,31 @@ class Tetris:
                 print_border(1, piece['color'])
 
     def draw(self):
-        # top border
-        move_cursor(self.top, self.left)
-        print_border(self.border_cols, BORDER_COLOR)
-        for r in range(self.field_rows):
-            # left border
-            move_cursor(self.field_top + r, self.left)
-            print_border(1, BORDER_COLOR)
-            # right border
-            move_cursor(self.field_top + r, self.field_left + self.field_cols)
-            print_border(1, BORDER_COLOR)
-        # bottom border
-        move_cursor(self.field_top + self.field_rows, self.left)
-        print_border(self.border_cols, BORDER_COLOR)
+        if not self.decoration_drawn:
+            self.decoration_drawn = True
+            # top border
+            move_cursor(self.top, self.left)
+            print_border(self.border_cols, BORDER_COLOR)
+            for r in range(self.field_rows):
+                # left border
+                move_cursor(self.field_top + r, self.left)
+                print_border(1, BORDER_COLOR)
+                # right border
+                move_cursor(self.field_top + r, self.field_left + self.field_cols)
+                print_border(1, BORDER_COLOR)
+            # bottom border
+            move_cursor(self.field_top + self.field_rows, self.left)
+            print_border(self.border_cols, BORDER_COLOR)
+
+            # gameinfo captions
+            move_cursor(self.gameinfo_top, self.gameinfo_left)
+            output_color('SCORE', bold=True)
+            move_cursor(self.gameinfo_top + 2, self.gameinfo_left)
+            output_color('LEVEL', bold=True)
+            move_cursor(self.gameinfo_top + 4, self.gameinfo_left)
+            output_color('LINES', bold=True)
+            move_cursor(self.gameinfo_top + 6, self.gameinfo_left)
+            output_color('NEXT', bold=True)
 
         if self.state != self.process_pause:
             # playing field
@@ -404,23 +426,21 @@ class Tetris:
                 self.draw_piece(x0, y0, self.piece)
 
         # game info
-        x0 = self.gameinfo_left
-        y0 = self.gameinfo_top
-        move_cursor(y0, x0)
-        output_color('SCORE', bold=True)
-        move_cursor(y0 + 1, x0)
-        output_color(f'{self.score:^{self.GAMEINFO_COLS}}', bold=True)
-        move_cursor(y0 + 2, x0)
-        output_color('LEVEL', bold=True)
-        move_cursor(y0 + 3, x0)
-        output_color(f'{self.level:^{self.GAMEINFO_COLS}}', bold=True)
-        move_cursor(y0 + 4, x0)
-        output_color('LINES', bold=True)
-        move_cursor(y0 + 5, x0)
-        output_color(f'{self.lines:^{self.GAMEINFO_COLS}}', bold=True)
-        move_cursor(y0 + 6, x0)
-        output_color('NEXT', bold=True)
-        self.draw_piece(x0 + 1, y0 + 7, self.next_piece)
+        if self.gameinfo_changed:
+            self.gameinfo_changed = False
+            move_cursor(self.gameinfo_top + 1, self.gameinfo_left)
+            output_color(f'{self.score:^{self.GAMEINFO_COLS}}', bold=True)
+            move_cursor(self.gameinfo_top + 3, self.gameinfo_left)
+            output_color(f'{self.level:^{self.GAMEINFO_COLS}}', bold=True)
+            move_cursor(self.gameinfo_top + 5, self.gameinfo_left)
+            output_color(f'{self.lines:^{self.GAMEINFO_COLS}}', bold=True)
+
+            move_cursor(self.gameinfo_top + 7, self.gameinfo_left + 1)
+            print_border(4, EMPTY_COLOR)
+            move_cursor(self.gameinfo_top + 8, self.gameinfo_left + 1)
+            print_border(4, EMPTY_COLOR)
+            self.draw_piece(self.gameinfo_left + 1, self.gameinfo_top + 7,
+                self.next_piece)
 
         # message
         if self.message:
@@ -453,7 +473,7 @@ class Tetris:
 
 def draw_fps(fps):
     move_cursor(1, 1)
-    output_color('FPS:' + str(fps), MESSAGE_COLOR, BORDER_COLOR)
+    output_color(f'FPS:{fps:<2}', MESSAGE_COLOR, BORDER_COLOR)
 
 def process_input():
     inp = sys.stdin.buffer.read()
@@ -505,6 +525,7 @@ def main():
     frames = 0
     t0_fps = time.monotonic()
     t0_update = time.monotonic()
+    clear()
     while True:
         t0_frame = time.monotonic()
         cmds, keys = process_input()
@@ -519,7 +540,6 @@ def main():
             break
         t0_update = t1_update
 
-        clear()
         tetris.draw()
         draw_fps(fps)
         flush()
