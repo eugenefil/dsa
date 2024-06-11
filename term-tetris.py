@@ -8,9 +8,10 @@ import atexit
 
 TARGET_FPS = 60
 FRAME_TIME = 1 / TARGET_FPS
-MOVE_TIMEOUT = 1
+MOVE_SPEED = 1 # blocks/sec
 NEW_PIECE_TIMEOUT = 0.100
 SPEEDUP_TIMEOUT = FRAME_TIME
+SPEEDUP_COEF = 20
 REMOVE_FILLED_TIMEOUT = NEW_PIECE_TIMEOUT * 2
 IDLE_TIMEOUT = 1
 
@@ -281,7 +282,7 @@ class Tetris:
             return True
 
         self.state = self.process_move
-        self.time_to_move = MOVE_TIMEOUT
+        self.blocks_traveled = 0
         return True
 
     def process_wait_for_new_piece(self, dt, keys):
@@ -330,26 +331,29 @@ class Tetris:
         return self.make_new_piece()
 
     def process_move(self, dt, keys):
+        speedup_coef = 1
         if self.speedup_time > 0:
             self.speedup_time -= dt
-            dt *= 40
+            speedup_coef = SPEEDUP_COEF
             self.add_score(1)
 
-        self.time_to_move -= dt
-        if self.time_to_move <= 0:
-            self.time_to_move += MOVE_TIMEOUT
-            self.piece['y'] += 1 # descend
-            if self.check_collision():
-                self.piece['y'] -= 1 # collision, revert
-                y0, height = self.piece['y'], self.piece['height']
-                self.consume_piece()
-                if self.check_filled_rows(y0, height):
-                    self.state = self.process_remove_filled
-                    self.remove_filled_time = REMOVE_FILLED_TIMEOUT
-                else:
-                    self.state = self.process_wait_for_new_piece
-                    self.time_to_new_piece = NEW_PIECE_TIMEOUT
-                return True
+        self.blocks_traveled += speedup_coef * MOVE_SPEED * dt
+        if self.blocks_traveled > 1:
+            whole_blocks = int(self.blocks_traveled)
+            self.blocks_traveled -= whole_blocks
+            for _ in range(whole_blocks):
+                self.piece['y'] += 1 # descend
+                if self.check_collision():
+                    self.piece['y'] -= 1 # collision, revert
+                    y0, height = self.piece['y'], self.piece['height']
+                    self.consume_piece()
+                    if self.check_filled_rows(y0, height):
+                        self.state = self.process_remove_filled
+                        self.remove_filled_time = REMOVE_FILLED_TIMEOUT
+                    else:
+                        self.state = self.process_wait_for_new_piece
+                        self.time_to_new_piece = NEW_PIECE_TIMEOUT
+                    return True
 
         for key in keys:
             if key == 'left':
