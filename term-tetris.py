@@ -306,13 +306,14 @@ class Tetris:
                 self.filled_rows.append(y)
         return len(self.filled_rows) > 0
 
-    def add_score(self, increment):
-        self.score += increment
+    def add_score(self, score):
+        self.score += score
         self.gameinfo_changed = True
 
-    def add_lines(self, increment):
-        self.lines += increment
-        self.add_score(100 * increment)
+    def add_lines(self, lines):
+        self.lines += lines
+        self.level = self.lines // 10 + 1
+        self.add_score(100 * lines * self.level)
 
     def process_remove_filled(self, dt, keys):
         self.remove_filled_time -= dt
@@ -334,7 +335,7 @@ class Tetris:
         return self.make_new_piece()
 
     def process_move(self, dt, keys):
-        speed = MOVE_SPEED
+        speed = MOVE_SPEED * 1.25**(self.level - 1)
         if self.speedup_time > 0:
             self.speedup_time -= dt
             speed *= SPEEDUP_COEF
