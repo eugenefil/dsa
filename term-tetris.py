@@ -563,7 +563,6 @@ def main():
     while True:
         t0_frame = time.monotonic()
         cmds, keys = process_input()
-
         if cmds.get('pause'):
             tetris.toggle_pause()
         if cmds.get('quit'):
@@ -571,9 +570,8 @@ def main():
 
         t1_update = time.monotonic()
         if not tetris.update(t1_update - t0_update, keys):
-            break
+            tetris = Tetris((1, 1, trows, tcols))
         t0_update = t1_update
-
         tetris.draw()
         draw_fps(fps)
         flush()
