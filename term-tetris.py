@@ -386,6 +386,12 @@ class Tetris:
                 move_cursor(y0 + r, x0 + c)
                 print_border(1, piece['color'])
 
+    def clear_next_piece(self):
+        move_cursor(self.gameinfo_top + 7, self.gameinfo_left + 1)
+        print_border(4, EMPTY_COLOR)
+        move_cursor(self.gameinfo_top + 8, self.gameinfo_left + 1)
+        print_border(4, EMPTY_COLOR)
+
     def draw(self):
         if not self.decoration_drawn:
             self.decoration_drawn = True
@@ -428,6 +434,14 @@ class Tetris:
                 x0 = self.field_left + self.piece['x']
                 y0 = self.field_top + self.piece['y']
                 self.draw_piece(x0, y0, self.piece)
+        else: # pause
+            if self.clear_field_for_pause:
+                self.clear_field_for_pause = False
+                # clear playing field
+                for y in range(self.field_rows):
+                    move_cursor(self.field_top + y, self.field_left)
+                    print_border(self.field_cols, EMPTY_COLOR)
+                self.clear_next_piece()
 
         # game info
         if self.gameinfo_changed:
@@ -439,10 +453,7 @@ class Tetris:
             move_cursor(self.gameinfo_top + 5, self.gameinfo_left)
             output_color(f'{self.lines:^{self.GAMEINFO_COLS}}', bold=True)
 
-            move_cursor(self.gameinfo_top + 7, self.gameinfo_left + 1)
-            print_border(4, EMPTY_COLOR)
-            move_cursor(self.gameinfo_top + 8, self.gameinfo_left + 1)
-            print_border(4, EMPTY_COLOR)
+            self.clear_next_piece()
             self.draw_piece(self.gameinfo_left + 1, self.gameinfo_top + 7,
                 self.next_piece)
 
@@ -468,10 +479,12 @@ class Tetris:
     def toggle_pause(self):
         if self.state != self.process_pause:
             self.message = 'pause'
+            self.clear_field_for_pause = True # hide playing field during pause
             self.prev_state = self.state
             self.state = self.process_pause
         else:
             self.message = None
+            self.gameinfo_changed = True # redraw next piece
             self.state = self.prev_state
 
 
