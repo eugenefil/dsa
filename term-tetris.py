@@ -9,6 +9,7 @@ import atexit
 TARGET_FPS = 60
 FRAME_TIME = 1 / TARGET_FPS
 MOVE_SPEED = 1 # blocks/sec
+DROP_SPEED = 100 # blocks/sec
 NEW_PIECE_TIMEOUT = 0.100
 SPEEDUP_TIMEOUT = FRAME_TIME
 SPEEDUP_COEF = 20
@@ -272,6 +273,8 @@ class Tetris:
 
     def make_new_piece(self):
         self.speedup_time = 0
+        self.drop = False
+
         self.piece = self.next_piece
         self.next_piece = self.new_piece()
         self.gameinfo_changed = True
@@ -331,18 +334,19 @@ class Tetris:
         return self.make_new_piece()
 
     def process_move(self, dt, keys):
-        speedup_coef = 1
+        speed = MOVE_SPEED
         if self.speedup_time > 0:
             self.speedup_time -= dt
-            speedup_coef = SPEEDUP_COEF
-            self.add_score(1)
+            speed *= SPEEDUP_COEF
+        if self.drop:
+            speed = DROP_SPEED # use _fixed_ super fast drop speed instead
 
-        self.blocks_traveled += speedup_coef * MOVE_SPEED * dt
+        self.blocks_traveled += speed * dt
         if self.blocks_traveled > 1:
             whole_blocks = int(self.blocks_traveled)
             self.blocks_traveled -= whole_blocks
             for _ in range(whole_blocks):
-                self.piece['y'] += 1 # descend
+                self.piece['y'] += 1 # try descend
                 if self.check_collision():
                     self.piece['y'] -= 1 # collision, revert
                     y0, height = self.piece['y'], self.piece['height']
@@ -354,6 +358,14 @@ class Tetris:
                         self.state = self.process_wait_for_new_piece
                         self.time_to_new_piece = NEW_PIECE_TIMEOUT
                     return True
+
+                if speed > MOVE_SPEED:
+                    # add point for every block traveled with extra speed
+                    self.add_score(1)
+
+        # can't navigate if dropping
+        if self.drop:
+            return True
 
         for key in keys:
             if key == 'left':
@@ -372,6 +384,8 @@ class Tetris:
                     self.piece['sprite_idx'] = orig
             elif key == 'down':
                 self.speedup_time = SPEEDUP_TIMEOUT
+            elif key == 'space':
+                self.drop = True
         return True
 
     def update(self, dt, keys):
@@ -522,6 +536,8 @@ def process_input():
                 cmds['pause'] = True
             elif ch == ord('q'):
                 cmds['quit'] = True
+            elif ch == ord(' '):
+                keys.append('space')
             i += 1
     return cmds, keys
             
