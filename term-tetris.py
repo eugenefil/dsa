@@ -41,23 +41,19 @@ PIECES = [
       [0, 1, 0, 0]]],
 
     # O
-    [[[0, 0, 0, 0],
-      [0, 1, 1, 0],
-      [0, 1, 1, 0],
-      [0, 0, 0, 0]],
-
-     [[0, 0, 0, 0],
-      [0, 1, 1, 0],
+    [[[0, 1, 1, 0],
       [0, 1, 1, 0],
       [0, 0, 0, 0]],
 
-     [[0, 0, 0, 0],
-      [0, 1, 1, 0],
+     [[0, 1, 1, 0],
       [0, 1, 1, 0],
       [0, 0, 0, 0]],
 
-     [[0, 0, 0, 0],
+     [[0, 1, 1, 0],
       [0, 1, 1, 0],
+      [0, 0, 0, 0]],
+
+     [[0, 1, 1, 0],
       [0, 1, 1, 0],
       [0, 0, 0, 0]]],
 
@@ -174,7 +170,7 @@ class Tetris:
         2 + # score caption + value
         2 + # level caption + value
         2 + # lines caption + value
-        4 # next caption + sprite 0 effective max height (3)
+        3 # next caption + sprite 0 effective max height (2)
     )
     GAMEINFO_COLS = 5 # max caption width (score, level, lines)
 
