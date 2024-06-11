@@ -15,7 +15,6 @@ REMOVE_FILLED_TIMEOUT = NEW_PIECE_TIMEOUT * 2
 IDLE_TIMEOUT = 1
 
 BORDER_COLOR = 47
-FILLED_COLOR = 41
 EMPTY_COLOR = 40
 MESSAGE_COLOR = 31
 
@@ -304,13 +303,14 @@ class Tetris:
                 self.filled_rows.append(y)
         return len(self.filled_rows) > 0
 
-    def paint_filled_rows(self, color):
-        for y in self.filled_rows:
-            self.grid[y] = [color] * self.field_cols
-
     def process_remove_filled(self, dt, keys):
         self.remove_filled_time -= dt
         if self.remove_filled_time > 0:
+            ratio = 1 - self.remove_filled_time / REMOVE_FILLED_TIMEOUT
+            blocks_removed = int(ratio * self.field_cols)
+            for y in self.filled_rows:
+                for x in range(blocks_removed):
+                    self.grid[y][x] = None
             return True
 
         assert len(self.filled_rows) > 0
@@ -338,7 +338,6 @@ class Tetris:
                 y0, height = self.piece['y'], self.piece['height']
                 self.consume_piece()
                 if self.check_filled_rows(y0, height):
-                    self.paint_filled_rows(FILLED_COLOR)
                     self.state = self.process_remove_filled
                     self.remove_filled_time = REMOVE_FILLED_TIMEOUT
                 else:
