@@ -15,6 +15,7 @@ SPEEDUP_TIMEOUT = FRAME_TIME
 SPEEDUP_COEF = 20
 REMOVE_FILLED_TIMEOUT = NEW_PIECE_TIMEOUT * 2
 IDLE_TIMEOUT = 1
+RESUME_TIMEOUT = 3
 
 BORDER_COLOR = 47
 EMPTY_COLOR = 40
@@ -168,6 +169,8 @@ class Tetris:
     BORDERS = 2
     MAX_SPRITE_HEIGHT = 4
     MAX_SPRITE_WIDTH = 4
+    MAX_MESSAGE_WIDTH = 6 # 'STEADY'
+
     GAMEINFO_ROWS = (
         2 + # score caption + value
         2 + # level caption + value
@@ -184,7 +187,7 @@ class Tetris:
 
     # game info, borders and playing field occupy separate terminal columns
     NON_FIELD_COLS = BORDERS + GAMEINFO_COLS
-    MIN_FIELD_COLS = MAX_SPRITE_WIDTH
+    MIN_FIELD_COLS = max(MAX_SPRITE_WIDTH, MAX_MESSAGE_WIDTH)
     MAX_FIELD_COLS = 10
     assert MAX_FIELD_COLS >= MIN_FIELD_COLS
     MIN_COLS = MIN_FIELD_COLS + NON_FIELD_COLS
@@ -214,7 +217,7 @@ class Tetris:
 
         self.grid = [[None] * self.field_cols for _ in range(self.field_rows)]
         self.decoration_drawn = False
-        self.message = None # overlay message like 'game over'
+        self.message_words = None # overlay message like 'GAME OVER'
         self.score = 0
         self.level = 1
         self.lines = 0
@@ -279,7 +282,7 @@ class Tetris:
         self.next_piece = self.new_piece()
         self.gameinfo_changed = True
         if self.check_collision():
-            self.message = 'game over'
+            self.message_words = ['GAME', 'OVER']
             self.state = self.process_idle
             self.idle_time = IDLE_TIMEOUT
             return True
@@ -438,7 +441,16 @@ class Tetris:
             move_cursor(self.gameinfo_top + 6, self.gameinfo_left)
             output_color('NEXT', bold=True)
 
-        if self.state != self.process_pause:
+        if self.state in (self.process_pause, self.process_resume):
+            # resume is considered part of pause here
+            if self.clear_field_for_pause:
+                self.clear_field_for_pause = False
+                # clear playing field
+                for y in range(self.field_rows):
+                    move_cursor(self.field_top + y, self.field_left)
+                    print_border(self.field_cols, EMPTY_COLOR)
+                self.clear_next_piece()
+        else:
             # playing field
             for r in range(self.field_rows):
                 move_cursor(self.field_top + r, self.field_left)
@@ -457,14 +469,6 @@ class Tetris:
                         self.draw_piece(x, self.field_top + y, self.piece)
                 else:
                     self.draw_piece(x, self.field_top + self.piece['y'], self.piece)
-        else: # pause
-            if self.clear_field_for_pause:
-                self.clear_field_for_pause = False
-                # clear playing field
-                for y in range(self.field_rows):
-                    move_cursor(self.field_top + y, self.field_left)
-                    print_border(self.field_cols, EMPTY_COLOR)
-                self.clear_next_piece()
 
         # game info
         if self.gameinfo_changed:
@@ -481,34 +485,49 @@ class Tetris:
                 self.next_piece)
 
         # message
-        if self.message:
-            y0, x0 = self.field_rows // 2 - 1, self.field_cols // 2 - 2
-            assert y0 >= 0
-            assert x0 >= 0
-            if self.message == 'game over':
-                move_cursor(self.field_top + y0, self.field_left + x0)
-                output_color('GAME', MESSAGE_COLOR, EMPTY_COLOR)
-                move_cursor(self.field_top + y0 + 1, self.field_left + x0)
-                output_color('OVER', MESSAGE_COLOR, EMPTY_COLOR)
-            elif self.message == 'pause':
-                move_cursor(self.field_top + y0, self.field_left + x0)
-                output_color('PAUSE', MESSAGE_COLOR, EMPTY_COLOR)
-            else:
-                assert 0
+        if self.message_words:
+            y0 = self.field_rows // 2 - len(self.message_words) // 2
+            x0 = self.field_cols // 2 - len(self.message_words[0]) // 2
+            for i, word in enumerate(self.message_words):
+                move_cursor(self.field_top + y0 + i, self.field_left + x0)
+                output_color(word, MESSAGE_COLOR, EMPTY_COLOR, bold=True)
 
     def process_pause(self, dt, keys):
         return True
 
+    def process_resume(self, dt, keys):
+        self.time_to_resume -= dt
+        if self.time_to_resume > 0:
+            i = int(self.time_to_resume / RESUME_TIMEOUT * 6)
+            i = min(i, 5) # should be [0, 5] anyway, but playing safe
+            if i % 2 > 0:
+                # erase message during odd intervals - flashing
+                self.message_words = None
+            elif i == 4:
+                self.message_words = ['READY']
+            elif i == 2:
+                self.message_words = ['STEADY']
+            else:
+                self.message_words = ['GO']
+            self.clear_field_for_pause = True # clear previous message
+            return True
+
+        self.message_words = None
+        self.gameinfo_changed = True # redraw next piece
+        self.state = self.prev_state
+        return True
+
     def toggle_pause(self):
         if self.state != self.process_pause:
-            self.message = 'pause'
+            self.message_words = ['PAUSE']
             self.clear_field_for_pause = True # hide playing field during pause
-            self.prev_state = self.state
+            if self.state != self.process_resume:
+                # if we're pausing from resume, previous state is already saved
+                self.prev_state = self.state
             self.state = self.process_pause
         else:
-            self.message = None
-            self.gameinfo_changed = True # redraw next piece
-            self.state = self.prev_state
+            self.state = self.process_resume
+            self.time_to_resume = RESUME_TIMEOUT
 
 
 def draw_fps(fps):
