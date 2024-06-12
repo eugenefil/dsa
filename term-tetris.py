@@ -14,7 +14,7 @@ NEW_PIECE_TIMEOUT = 0.100
 SPEEDUP_TIMEOUT = FRAME_TIME
 SPEEDUP_COEF = 20
 REMOVE_FILLED_TIMEOUT = NEW_PIECE_TIMEOUT * 2
-IDLE_TIMEOUT = 1
+GAMEOVER_TIMEOUT = 0.5
 RESUME_TIMEOUT = 3
 
 BORDER_COLOR = 47
@@ -225,6 +225,8 @@ class Tetris:
 
         self.next_piece = self.new_piece()
         self.make_new_piece()
+        self.toggle_pause() # imitate resuming to get READY, STEADY, GO
+        self.toggle_pause()
 
     def new_piece(self):
         sprites = random.choice(PIECES)
@@ -268,11 +270,11 @@ class Tetris:
                 self.grid[y][x] = self.piece['color']
         self.piece = None
 
-    def process_idle(self, dt, keys):
-        self.idle_time -= dt
-        if self.idle_time > 0:
+    def process_gameover(self, dt, keys):
+        self.gameover_time -= dt
+        if self.gameover_time > 0:
             return True
-        return len(keys) == 0 # exit on any key
+        return len(keys) == 0 # exit on any key after timeout elapsed
 
     def make_new_piece(self):
         self.speedup_time = 0
@@ -283,8 +285,8 @@ class Tetris:
         self.gameinfo_changed = True
         if self.check_collision():
             self.message_words = ['GAME', 'OVER']
-            self.state = self.process_idle
-            self.idle_time = IDLE_TIMEOUT
+            self.state = self.process_gameover
+            self.gameover_time = GAMEOVER_TIMEOUT
             return True
 
         self.state = self.process_move
@@ -470,19 +472,19 @@ class Tetris:
                 else:
                     self.draw_piece(x, self.field_top + self.piece['y'], self.piece)
 
-        # game info
-        if self.gameinfo_changed:
-            self.gameinfo_changed = False
-            move_cursor(self.gameinfo_top + 1, self.gameinfo_left)
-            output_color(f'{self.score:^{self.GAMEINFO_COLS}}', bold=True)
-            move_cursor(self.gameinfo_top + 3, self.gameinfo_left)
-            output_color(f'{self.level:^{self.GAMEINFO_COLS}}', bold=True)
-            move_cursor(self.gameinfo_top + 5, self.gameinfo_left)
-            output_color(f'{self.lines:^{self.GAMEINFO_COLS}}', bold=True)
+            # game info
+            if self.gameinfo_changed:
+                self.gameinfo_changed = False
+                move_cursor(self.gameinfo_top + 1, self.gameinfo_left)
+                output_color(f'{self.score:^{self.GAMEINFO_COLS}}', bold=True)
+                move_cursor(self.gameinfo_top + 3, self.gameinfo_left)
+                output_color(f'{self.level:^{self.GAMEINFO_COLS}}', bold=True)
+                move_cursor(self.gameinfo_top + 5, self.gameinfo_left)
+                output_color(f'{self.lines:^{self.GAMEINFO_COLS}}', bold=True)
 
-            self.clear_next_piece()
-            self.draw_piece(self.gameinfo_left + 1, self.gameinfo_top + 7,
-                self.next_piece)
+                self.clear_next_piece()
+                self.draw_piece(self.gameinfo_left + 1, self.gameinfo_top + 7,
+                    self.next_piece)
 
         # message
         if self.message_words:
@@ -598,6 +600,7 @@ def main():
         t1_update = time.monotonic()
         if not tetris.update(t1_update - t0_update, keys):
             tetris = Tetris((1, 1, trows, tcols))
+            clear()
         t0_update = t1_update
         tetris.draw()
         draw_fps(fps)
