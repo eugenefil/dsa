@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import time
 import random
 import os
@@ -5,11 +6,12 @@ import sys
 import termios
 import tty
 import atexit
+import argparse
 
 TARGET_FPS = 60
 FRAME_TIME = 1 / TARGET_FPS
 MOVE_SPEED = 1 # blocks/sec
-DROP_SPEED = 100 # blocks/sec
+DROP_SPEED = 150 # blocks/sec
 NEW_PIECE_TIMEOUT = 0.100
 SPEEDUP_TIMEOUT = FRAME_TIME
 SPEEDUP_COEF = 20
@@ -192,18 +194,20 @@ class Tetris:
     assert MAX_FIELD_COLS >= MIN_FIELD_COLS
     MIN_COLS = MIN_FIELD_COLS + NON_FIELD_COLS
 
-    def __init__(self, screen_rect):
+    def __init__(self, screen_rect, no_limits=False):
         top, left, rows, cols = screen_rect
         if rows < self.MIN_ROWS:
             raise ValueError('not enough terminal rows')
         self.field_rows = rows - self.BORDERS
-        self.field_rows = min(self.field_rows, self.MAX_FIELD_ROWS)
+        if not no_limits:
+            self.field_rows = min(self.field_rows, self.MAX_FIELD_ROWS)
         self.rows = self.field_rows + self.BORDERS
 
         if cols < self.MIN_COLS:
             raise ValueError('not enough terminal columns')
         self.field_cols = cols - self.NON_FIELD_COLS
-        self.field_cols = min(self.field_cols, self.MAX_FIELD_COLS)
+        if not no_limits:
+            self.field_cols = min(self.field_cols, self.MAX_FIELD_COLS)
         self.border_cols = self.field_cols + self.BORDERS
         self.cols = self.field_cols + self.NON_FIELD_COLS
 
@@ -571,8 +575,19 @@ def process_input():
             i += 1
     return cmds, keys
             
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Terminal tetris.'
+    )
+    parser.add_argument('--no-limits',
+        help='Disable restrictions on max playing field size',
+        action='store_true',
+    )
+    return parser.parse_args()
 
 def main():
+    args = parse_args()
+
     # disable terminal echoing and line buffering
     orig_attrs = termios.tcgetattr(sys.stdin)
     @atexit.register
@@ -582,7 +597,7 @@ def main():
     os.set_blocking(sys.stdin.fileno(), False)
 
     tcols, trows = os.get_terminal_size()
-    tetris = Tetris((1, 1, trows, tcols))
+    tetris = Tetris((1, 1, trows, tcols), no_limits=args.no_limits)
 
     fps = 0
     frames = 0
@@ -599,7 +614,7 @@ def main():
 
         t1_update = time.monotonic()
         if not tetris.update(t1_update - t0_update, keys):
-            tetris = Tetris((1, 1, trows, tcols))
+            tetris = Tetris((1, 1, trows, tcols), no_limits=args.no_limits)
             clear()
         t0_update = t1_update
         tetris.draw()
