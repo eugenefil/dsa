@@ -194,6 +194,8 @@ class Tetris:
     assert MAX_FIELD_COLS >= MIN_FIELD_COLS
     MIN_COLS = MIN_FIELD_COLS + NON_FIELD_COLS
 
+    ASPECT_RATIO = MAX_FIELD_ROWS // MAX_FIELD_COLS
+
     def __init__(self, screen_rect, no_limits=False):
         top, left, rows, cols = screen_rect
         if rows < self.MIN_ROWS:
@@ -276,9 +278,7 @@ class Tetris:
 
     def process_gameover(self, dt, keys):
         self.gameover_time -= dt
-        if self.gameover_time > 0:
-            return True
-        return len(keys) == 0 # exit on any key after timeout elapsed
+        return self.gameover_time <= 0
 
     def make_new_piece(self):
         self.speedup_time = 0
@@ -291,16 +291,15 @@ class Tetris:
             self.message_words = ['GAME', 'OVER']
             self.state = self.process_gameover
             self.gameover_time = GAMEOVER_TIMEOUT
-            return True
+            return
 
         self.state = self.process_move
         self.blocks_traveled = 0
-        return True
 
     def process_wait_for_new_piece(self, dt, keys):
         self.time_to_new_piece -= dt
         if self.time_to_new_piece > 0:
-            return True
+            return
         return self.make_new_piece()
 
     def check_filled_rows(self, y0, height):
@@ -332,7 +331,7 @@ class Tetris:
             for y in self.filled_rows:
                 for x in range(blocks_removed):
                     self.grid[y][x] = None
-            return True
+            return
 
         assert len(self.filled_rows) > 0
         for y in reversed(self.filled_rows):
@@ -367,7 +366,7 @@ class Tetris:
                     else:
                         self.state = self.process_wait_for_new_piece
                         self.time_to_new_piece = NEW_PIECE_TIMEOUT
-                    return True
+                    return
 
                 if speed > MOVE_SPEED:
                     # add point for every block traveled with extra speed
@@ -378,7 +377,7 @@ class Tetris:
 
         # can't navigate if dropping
         if self.drop:
-            return True
+            return
 
         for key in keys:
             if key == 'left':
@@ -400,7 +399,6 @@ class Tetris:
             elif key == 'space':
                 self.drop = True
                 self.drop_trail = []
-        return True
 
     def update(self, dt, keys):
         return self.state(dt, keys)
@@ -499,7 +497,7 @@ class Tetris:
                 output_color(word, MESSAGE_COLOR, EMPTY_COLOR, bold=True)
 
     def process_pause(self, dt, keys):
-        return True
+        pass
 
     def process_resume(self, dt, keys):
         self.time_to_resume -= dt
@@ -516,12 +514,11 @@ class Tetris:
             else:
                 self.message_words = ['GO']
             self.clear_field_for_pause = True # clear previous message
-            return True
+            return
 
         self.message_words = None
         self.gameinfo_changed = True # redraw next piece
         self.state = self.prev_state
-        return True
 
     def toggle_pause(self):
         if self.state != self.process_pause:
@@ -583,7 +580,78 @@ def parse_args():
         help='Disable restrictions on max playing field size',
         action='store_true',
     )
+    def positive_integer(s):
+        x = int(s)
+        if x <= 0:
+            raise ValueError
+        return x
+    parser.add_argument('--num',
+        help='Play simultaneously on NUM playing fields',
+        type=positive_integer,
+        default=1,
+    )
     return parser.parse_args()
+
+# for a given total number of tetrises on the screen brute-force search
+# the best combination of rows x cols those tetrises must occupy, while
+# respecting the desirable tetris aspect ratio as much as possible
+def find_tetris_matrix(total_tetrises, screen_height, screen_width):
+    def lossfn(rows_of_tetrises, cols_of_tetrises):
+        tetris_height = screen_height / rows_of_tetrises
+        tetris_width = screen_width / cols_of_tetrises
+        tetris_aspect = tetris_height / tetris_width
+        # penalize for deviating from aspect ratio and total num of tetrises
+        return ((tetris_aspect - Tetris.ASPECT_RATIO)**2 +
+            (rows_of_tetrises * cols_of_tetrises - total_tetrises)**2)
+
+    max_rows_of_tetrises = screen_height // Tetris.MIN_ROWS
+    max_cols_of_tetrises = screen_width // Tetris.MIN_COLS
+    best = (0, 0)
+    min_loss = 10000000
+    for rows in range(1, max_rows_of_tetrises + 1):
+        for cols in range(1, max_cols_of_tetrises + 1):
+            if rows * cols < total_tetrises:
+                continue
+            loss = lossfn(rows, cols)
+            if loss < min_loss:
+                min_loss = loss
+                best = (rows, cols)
+    return best
+
+def create_tetrises(args):
+    screen_width, screen_height = os.get_terminal_size()
+    if args.num == 1:
+        return [Tetris(
+            (1, 1, screen_height, screen_width),
+            no_limits=args.no_limits
+        )]
+
+    rows, cols = find_tetris_matrix(args.num, screen_height, screen_width)
+    if rows == 0 or cols == 0:
+        raise ValueError(f'cannot pack {args.num} tetrises')
+    tetris_height = screen_height // rows
+    tetris_width = screen_width // cols
+
+    vfiller = 0 # vertical space between tetrises
+    if rows > 1:
+        vfiller = (screen_height - tetris_height * rows) // (rows - 1)
+    hfiller = 0 # horizontal space between tetrises
+    if cols > 1:
+        hfiller = (screen_width - tetris_width * cols) // (cols - 1)
+
+    tetrises = []
+    for r in range(rows):
+        for c in range(cols):
+            screen_rect = (
+                1 + r * (tetris_height + vfiller),
+                1 + c * (tetris_width + hfiller),
+                tetris_height,
+                tetris_width
+            )
+            tetrises.append(Tetris(screen_rect, no_limits=args.no_limits))
+            if len(tetrises) == args.num:
+                return tetrises
+    return tetrises
 
 def main():
     args = parse_args()
@@ -596,28 +664,34 @@ def main():
     tty.setcbreak(sys.stdin.fileno())
     os.set_blocking(sys.stdin.fileno(), False)
 
-    tcols, trows = os.get_terminal_size()
-    tetris = Tetris((1, 1, trows, tcols), no_limits=args.no_limits)
+    tetrises = create_tetrises(args)
+    clear()
 
     fps = 0
     frames = 0
     t0_fps = time.monotonic()
     t0_update = time.monotonic()
-    clear()
     while True:
         t0_frame = time.monotonic()
         cmds, keys = process_input()
-        if cmds.get('pause'):
-            tetris.toggle_pause()
         if cmds.get('quit'):
             break
+        if cmds.get('pause'):
+            for tetris in tetrises:
+                tetris.toggle_pause()
 
         t1_update = time.monotonic()
-        if not tetris.update(t1_update - t0_update, keys):
-            tetris = Tetris((1, 1, trows, tcols), no_limits=args.no_limits)
-            clear()
+        dt = t1_update - t0_update
+        all_done = True
+        for tetris in tetrises:
+            tetris_done = tetris.update(dt, keys)
+            all_done = all_done and tetris_done
         t0_update = t1_update
-        tetris.draw()
+        if all_done and len(keys) > 0:
+            tetrises = create_tetrises(args)
+            clear()
+        for tetris in tetrises:
+            tetris.draw()
         draw_fps(fps)
         flush()
 
