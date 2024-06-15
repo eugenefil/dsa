@@ -16,11 +16,12 @@ NEW_PIECE_TIMEOUT = 0.100
 SPEEDUP_TIMEOUT = FRAME_TIME
 SPEEDUP_COEF = 20
 REMOVE_FILLED_TIMEOUT = NEW_PIECE_TIMEOUT * 2
-GAMEOVER_TIMEOUT = 0.5
 RESUME_TIMEOUT = 3
 
-BORDER_COLOR = 47
 EMPTY_COLOR = 40
+MIN_PIECE_COLOR = 41
+BORDER_COLOR = 47
+MAX_PIECE_COLOR = BORDER_COLOR # exclusive
 MESSAGE_COLOR = 31
 
 PIECES = [
@@ -196,7 +197,8 @@ class Tetris:
 
     ASPECT_RATIO = MAX_FIELD_ROWS // MAX_FIELD_COLS
 
-    def __init__(self, screen_rect, no_limits=False):
+    def __init__(self, screen_rect, no_limits=False,
+            active_border_color=BORDER_COLOR, min_piece_color=MIN_PIECE_COLOR):
         top, left, rows, cols = screen_rect
         if rows < self.MIN_ROWS:
             raise ValueError('not enough terminal rows')
@@ -223,7 +225,11 @@ class Tetris:
 
         self.grid = [[None] * self.field_cols for _ in range(self.field_rows)]
         self.decoration_drawn = False
+        self.active_border_color = active_border_color
+        self.set_active(False) # set border color
+        self.min_piece_color = min_piece_color
         self.message_words = None # overlay message like 'GAME OVER'
+
         self.score = 0
         self.level = 1
         self.lines = 0
@@ -239,7 +245,7 @@ class Tetris:
         width = len(sprites[0][0])
         height = len(sprites[0])
         return {
-            'color': random.choice(range(41, 47)),
+            'color': random.choice(range(self.min_piece_color, MAX_PIECE_COLOR)),
             'sprites': sprites,
             'sprite_idx': 0,
             'x': self.field_cols // 2 - width // 2,
@@ -277,8 +283,10 @@ class Tetris:
         self.piece = None
 
     def process_gameover(self, dt, keys):
-        self.gameover_time -= dt
-        return self.gameover_time <= 0
+        return True # give up control, we're finished
+
+    def is_finished(self):
+        return self.state == self.process_gameover
 
     def make_new_piece(self):
         self.speedup_time = 0
@@ -290,8 +298,7 @@ class Tetris:
         if self.check_collision():
             self.message_words = ['GAME', 'OVER']
             self.state = self.process_gameover
-            self.gameover_time = GAMEOVER_TIMEOUT
-            return
+            return True # give up control, game over
 
         self.state = self.process_move
         self.blocks_traveled = 0
@@ -366,7 +373,7 @@ class Tetris:
                     else:
                         self.state = self.process_wait_for_new_piece
                         self.time_to_new_piece = NEW_PIECE_TIMEOUT
-                    return
+                    return True # give up control for next tetris
 
                 if speed > MOVE_SPEED:
                     # add point for every block traveled with extra speed
@@ -375,7 +382,7 @@ class Tetris:
                 if self.drop:
                     self.drop_trail.append(self.piece['y'])
 
-        # can't navigate if dropping
+        # not allowed to navigate when dropping
         if self.drop:
             return
 
@@ -423,17 +430,17 @@ class Tetris:
             self.decoration_drawn = True
             # top border
             move_cursor(self.top, self.left)
-            print_border(self.border_cols, BORDER_COLOR)
+            print_border(self.border_cols, self.border_color)
             for r in range(self.field_rows):
                 # left border
                 move_cursor(self.field_top + r, self.left)
-                print_border(1, BORDER_COLOR)
+                print_border(1, self.border_color)
                 # right border
                 move_cursor(self.field_top + r, self.field_left + self.field_cols)
-                print_border(1, BORDER_COLOR)
+                print_border(1, self.border_color)
             # bottom border
             move_cursor(self.field_top + self.field_rows, self.left)
-            print_border(self.border_cols, BORDER_COLOR)
+            print_border(self.border_cols, self.border_color)
 
             # gameinfo captions
             move_cursor(self.gameinfo_top, self.gameinfo_left)
@@ -495,6 +502,13 @@ class Tetris:
             for i, word in enumerate(self.message_words):
                 move_cursor(self.field_top + y0 + i, self.field_left + x0)
                 output_color(word, MESSAGE_COLOR, EMPTY_COLOR, bold=True)
+
+    def set_active(self, active):
+        if active:
+            self.border_color = self.active_border_color
+        else:
+            self.border_color = BORDER_COLOR
+        self.decoration_drawn = False
 
     def process_pause(self, dt, keys):
         pass
@@ -648,14 +662,16 @@ def create_tetrises(args):
                 tetris_height,
                 tetris_width
             )
-            tetrises.append(Tetris(screen_rect, no_limits=args.no_limits))
+            tetrises.append(Tetris(screen_rect,
+                # borrow min piece color to draw borders of active tetris
+                active_border_color=MIN_PIECE_COLOR,
+                min_piece_color=MIN_PIECE_COLOR + 1,
+                no_limits=args.no_limits))
             if len(tetrises) == args.num:
                 return tetrises
     return tetrises
 
-def main():
-    args = parse_args()
-
+def setup_terminal():
     # disable terminal echoing and line buffering
     orig_attrs = termios.tcgetattr(sys.stdin)
     @atexit.register
@@ -664,9 +680,17 @@ def main():
     tty.setcbreak(sys.stdin.fileno())
     os.set_blocking(sys.stdin.fileno(), False)
 
+def init_tetrises(args):
     tetrises = create_tetrises(args)
+    active_tetris = 0
+    tetrises[active_tetris].set_active(True)
     clear()
+    return tetrises, active_tetris
 
+def main():
+    setup_terminal()
+    args = parse_args()
+    tetrises, active_tetris = init_tetrises(args)
     fps = 0
     frames = 0
     t0_fps = time.monotonic()
@@ -682,14 +706,33 @@ def main():
 
         t1_update = time.monotonic()
         dt = t1_update - t0_update
-        all_done = True
-        for tetris in tetrises:
-            tetris_done = tetris.update(dt, keys)
-            all_done = all_done and tetris_done
+        num_finished = 0
+        active_done = False
+        for i, tetris in enumerate(tetrises):
+            if i == active_tetris:
+                active_done = tetris.update(dt, keys)
+            else:
+                tetris.update(dt, [])
+            num_finished += int(tetris.is_finished())
         t0_update = t1_update
-        if all_done and len(keys) > 0:
-            tetrises = create_tetrises(args)
-            clear()
+
+        if num_finished == len(tetrises):
+            if len(keys) > 0: # restart on key press
+                tetrises, active_tetris = init_tetrises(args)
+        elif active_done:
+            # find next unfinished tetris and activate it
+            next_active = None
+            for offset in range(1, len(tetrises)):
+                i = (active_tetris + offset) % len(tetrises)
+                if not tetrises[i].is_finished():
+                    next_active = i
+                    break
+            if next_active is not None:
+                assert next_active != active_tetris
+                tetrises[active_tetris].set_active(False)
+                tetrises[next_active].set_active(True)
+                active_tetris = next_active
+
         for tetris in tetrises:
             tetris.draw()
         draw_fps(fps)
