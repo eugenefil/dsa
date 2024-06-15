@@ -17,6 +17,7 @@ SPEEDUP_TIMEOUT = FRAME_TIME
 SPEEDUP_COEF = 20
 REMOVE_FILLED_TIMEOUT = NEW_PIECE_TIMEOUT * 2
 RESUME_TIMEOUT = 3
+GAMEOVER_BLOCK_TIMEOUT = 0.75
 
 EMPTY_COLOR = 40
 MIN_PIECE_COLOR = 41
@@ -283,7 +284,12 @@ class Tetris:
         self.piece = None
 
     def process_gameover(self, dt, keys):
+        self.time_to_unblock -= dt
         return True # give up control, we're finished
+
+    def is_blocked(self):
+        assert self.is_finished()
+        return self.time_to_unblock > 0
 
     def is_finished(self):
         return self.state == self.process_gameover
@@ -298,6 +304,7 @@ class Tetris:
         if self.check_collision():
             self.message_words = ['GAME', 'OVER']
             self.state = self.process_gameover
+            self.time_to_unblock = GAMEOVER_BLOCK_TIMEOUT
             return True # give up control, game over
 
         self.state = self.process_move
@@ -717,7 +724,8 @@ def main():
         t0_update = t1_update
 
         if num_finished == len(tetrises):
-            if len(keys) > 0: # restart on key press
+            if len(keys) > 0 and not tetrises[active_tetris].is_blocked():
+                # restart on key press
                 tetrises, active_tetris = init_tetrises(args)
         elif active_done:
             # find next unfinished tetris and activate it
