@@ -66,8 +66,8 @@ impl<T> Drop for SpinLockGuard<'_, T> {
 
 // with Deref, SpinLockGuard behaves like &T so should be Sync only if T is Sync
 unsafe impl<T: Sync> Sync for SpinLockGuard<'_, T> {}
-// same for Send
-unsafe impl<T: Sync> Send for SpinLockGuard<'_, T> {}
+// with DerefMut, we can update the value from another thread, so T should be Send
+unsafe impl<T: Send> Send for SpinLockGuard<'_, T> {}
 
 #[cfg(test)]
 mod tests {
