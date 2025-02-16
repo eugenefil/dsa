@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 pub struct Mutex<T> {
     // 0 - unlocked
-    // 1 - locked
+    // 1 - locked, no waiters
+    // 2 - locked, there are waiters
     state: AtomicU32,
     data: UnsafeCell<T>,
 }
@@ -25,8 +26,16 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
-        while self.state.swap(1, Ordering::Acquire) == 1 {
-            futex::wait(&self.state, 1).unwrap(); // compare-and-block, see futex(2)
+        if self
+            .state
+            .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            // after a waiter is woken, it doesn't know whether there are more waiters,
+            // so it sets the state to 2 in case there are waiters left
+            while self.state.swap(2, Ordering::Acquire) != 0 {
+                futex::wait(&self.state, 2).unwrap(); // compare-and-block, see futex(2)
+            }
         }
         MutexGuard { mutex: self }
     }
@@ -61,8 +70,10 @@ impl<T> std::ops::DerefMut for MutexGuard<'_, T> {
 
 impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
-        self.mutex.state.store(0, Ordering::Release);
-        futex::wake(&self.mutex.state, 1).unwrap();
+        // do syscall only if we have waiters
+        if self.mutex.state.swap(0, Ordering::Release) == 2 {
+            futex::wake(&self.mutex.state, 1).unwrap();
+        }
     }
 }
 
