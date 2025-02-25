@@ -1,11 +1,11 @@
 use std::collections::VecDeque;
 
-type Link<T> = Option<Box<Node<T>>>;
+type Subtree<T> = Option<Box<Node<T>>>;
 
 struct Node<T> {
     elem: T,
-    left: Link<T>,
-    right: Link<T>,
+    left: Subtree<T>,
+    right: Subtree<T>,
 }
 
 impl<T> Node<T> {
@@ -20,41 +20,39 @@ impl<T> Node<T> {
     fn iter_mut(&mut self) -> NodeIterMut<'_, T> {
         NodeIterMut {
             elem: Some(&mut self.elem),
-            left: self.left.as_mut(),
-            right: self.right.as_mut(),
+            left: self.left.as_mut().map(|node| &mut **node),
+            right: self.right.as_mut().map(|node| &mut **node),
         }
     }
 }
 
 struct NodeIterMut<'a, T> {
     elem: Option<&'a mut T>,
-    left: Option<&'a mut Box<Node<T>>>,
-    right: Option<&'a mut Box<Node<T>>>,
+    left: Option<&'a mut Node<T>>,
+    right: Option<&'a mut Node<T>>,
 }
 
-enum NodeIterItem<'a, T> {
+enum NodeItemMut<'a, T> {
     Elem(&'a mut T),
-    Node(&'a mut Box<Node<T>>),
+    Node(&'a mut Node<T>),
 }
 
 impl<'a, T> Iterator for NodeIterMut<'a, T> {
-    type Item = NodeIterItem<'a, T>;
+    type Item = NodeItemMut<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.left.take() {
-            Some(node) => Some(NodeIterItem::Node(node)),
+            Some(node) => Some(NodeItemMut::Node(node)),
             None => match self.elem.take() {
-                Some(elem) => Some(NodeIterItem::Elem(elem)),
-                None => self.right.take().map(|node| {
-                    NodeIterItem::Node(node)
-                }),
+                Some(elem) => Some(NodeItemMut::Elem(elem)),
+                None => self.right.take().map(|node| NodeItemMut::Node(node)),
             },
         }
     }
 }
 
 pub struct Tree<T> {
-    root: Link<T>,
+    root: Subtree<T>,
 }
 
 impl<T: Ord> Tree<T> {
@@ -89,9 +87,9 @@ impl<T: Ord> Tree<T> {
 
     pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         let mut iters = VecDeque::new();
-        if let Some(root) = self.root.as_mut() {
-            iters.push_front(root.iter_mut());
-        }
+        self.root
+            .as_mut()
+            .map(|root| iters.push_front(root.iter_mut()));
         IterMut(iters)
     }
 }
@@ -107,19 +105,11 @@ impl<'a, T> Iterator for IterMut<'a, T> {
                 return None;
             };
             match iter.next() {
-                Some(item) => match item {
-                    NodeIterItem::Elem(elem) => {
-                        return Some(elem);
-                    },
-                    NodeIterItem::Node(node) => {
-                        self.0.push_front(node.iter_mut());
-                        continue;
-                    },
-                },
+                Some(NodeItemMut::Elem(elem)) => return Some(elem),
+                Some(NodeItemMut::Node(node)) => self.0.push_front(node.iter_mut()),
                 None => {
                     self.0.pop_front();
-                    continue;
-                },
+                }
             }
         }
     }
@@ -132,8 +122,10 @@ mod tests {
     #[test]
     fn it_works() {
         let mut t = Tree::new();
+        assert!(t.iter_mut().eq(vec![].iter_mut()));
         t.insert(20);
         t.insert(10);
+        t.insert(15);
         t.insert(15);
         t.insert(30);
         assert!(t.iter_mut().eq(vec![10, 15, 20, 30].iter_mut()));
