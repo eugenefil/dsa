@@ -20,8 +20,8 @@ impl<T> Node<T> {
     fn iter_mut(&mut self) -> NodeIterMut<'_, T> {
         NodeIterMut {
             elem: Some(&mut self.elem),
-            left: self.left.as_mut().map(|node| &mut **node),
-            right: self.right.as_mut().map(|node| &mut **node),
+            left: self.left.as_deref_mut(),
+            right: self.right.as_deref_mut(),
         }
     }
 }
@@ -61,7 +61,7 @@ impl<T: Ord> Tree<T> {
     }
 
     pub fn insert(&mut self, t: T) {
-        let Some(mut node) = self.root.as_mut() else {
+        let Some(mut node) = self.root.as_deref_mut() else {
             self.root = Some(Box::new(Node::new(t)));
             return;
         };
@@ -71,7 +71,7 @@ impl<T: Ord> Tree<T> {
                     node.left = Some(Box::new(Node::new(t)));
                     return;
                 }
-                node = node.left.as_mut().unwrap();
+                node = node.left.as_deref_mut().unwrap();
             } else {
                 if t == node.elem {
                     return;
@@ -80,7 +80,7 @@ impl<T: Ord> Tree<T> {
                     node.right = Some(Box::new(Node::new(t)));
                     return;
                 }
-                node = node.right.as_mut().unwrap();
+                node = node.right.as_deref_mut().unwrap();
             }
         }
     }
@@ -88,7 +88,7 @@ impl<T: Ord> Tree<T> {
     pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         let mut iters = VecDeque::new();
         self.root
-            .as_mut()
+            .as_deref_mut()
             .map(|root| iters.push_front(root.iter_mut()));
         IterMut(iters)
     }
