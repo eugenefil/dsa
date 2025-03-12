@@ -138,6 +138,9 @@ impl<T> LinkedList<T> {
     }
 }
 
+unsafe impl<T> Send for LinkedList<T> {}
+unsafe impl<T> Sync for LinkedList<T> {}
+
 impl<T> Drop for LinkedList<T> {
     fn drop(&mut self) {
         while let Some(_) = self.pop_front() {}
@@ -169,6 +172,9 @@ pub struct Iter<'a, T> {
     len: usize,
     marker: PhantomData<&'a T>,
 }
+
+unsafe impl<T> Send for Iter<'_, T> {}
+unsafe impl<T> Sync for Iter<'_, T> {}
 
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
@@ -211,6 +217,9 @@ pub struct IterMut<'a, T> {
     len: usize,
     marker: PhantomData<&'a mut T>,
 }
+
+unsafe impl<T> Send for IterMut<'_, T> {}
+unsafe impl<T> Sync for IterMut<'_, T> {}
 
 impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
@@ -332,4 +341,50 @@ mod tests {
         assert_eq!(it.next(), Some(&mut 10));
         assert_eq!(it.next(), None);
     }
+
+    #[allow(dead_code)]
+    fn test_sync_send() {
+        fn is_sync<T: Sync>() {}
+        fn is_send<T: Send>() {}
+
+        is_sync::<LinkedList<i32>>();
+        is_send::<LinkedList<i32>>();
+
+        is_sync::<IntoIter<i32>>();
+        is_send::<IntoIter<i32>>();
+
+        is_sync::<Iter<i32>>();
+        is_send::<Iter<i32>>();
+
+        is_sync::<IterMut<i32>>();
+        is_send::<IterMut<i32>>();
+    }
+
+    #[allow(dead_code)]
+    fn test_variance() {
+        fn list_is_covariant<'a, T>(x: LinkedList<&'static T>) -> LinkedList<&'a T> {
+            x
+        }
+        fn into_iter_is_covariant<'a, T>(x: IntoIter<&'static T>) -> IntoIter<&'a T> {
+            x
+        }
+        fn iter_is_covariant_over_a<'a, T>(x: Iter<'static, T>) -> Iter<'a, T> {
+            x
+        }
+        fn iter_is_covariant_over_t<'i, 'a, T>(x: Iter<'i, &'static T>) -> Iter<'i, &'a T> {
+            x
+        }
+        fn iter_mut_is_covariant_over_a<'a, T>(x: IterMut<'static, T>) -> IterMut<'a, T> {
+            x
+        }
+    }
 }
+
+/// ```compile_fail
+/// use linked_list_rs::IterMut;
+/// fn iter_mut_is_covariant_over_t<'i, 'a, T>(x: IterMut<'i, &'static T>) -> IterMut<'i, &'a T> {
+///     x
+/// }
+/// ```
+#[allow(dead_code)]
+fn test_invariance() {}
