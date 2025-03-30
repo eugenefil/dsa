@@ -1,4 +1,6 @@
 use std::alloc::{self, Layout};
+use std::marker::PhantomData;
+use std::ops;
 use std::ptr::NonNull;
 
 pub struct Vec<T> {
@@ -88,6 +90,44 @@ impl<T> Vec<T> {
                 .copy_to(self.ptr.add(index), self.len - index - 1);
             self.len -= 1;
             result
+        }
+    }
+
+    pub fn drain<R>(&mut self, range: R) -> Drain<'_, T>
+    where
+        R: ops::RangeBounds<usize>,
+    {
+        // see https://doc.rust-lang.org/std/slice/fn.range.html, which is experimental
+        // [start, end) - we need start included, end excluded
+        use ops::Bound;
+        let start = match range.start_bound() {
+            Bound::Included(&start) => start,
+            // if start is excluded, take next one so as to be included
+            Bound::Excluded(&start) => start.checked_add(1).unwrap(),
+            Bound::Unbounded => 0,
+        };
+
+        let end = match range.end_bound() {
+            // if end is included, take next one so as to be excluded
+            Bound::Included(&end) => end.checked_add(1).unwrap(),
+            Bound::Excluded(&end) => end,
+            Bound::Unbounded => self.len,
+        };
+
+        assert!(start <= end, "range start should be lower than range end");
+        assert!(end <= self.len, "range end is out of bounds");
+
+        let tail_len = self.len - end;
+        // exception safety: elements before drain start are safe to access after panic
+        self.len = start;
+
+        Drain {
+            vec: unsafe { NonNull::new_unchecked(self) },
+            _marker: PhantomData,
+            tail_start: end,
+            tail_len,
+            beg: unsafe { self.ptr.add(start).as_ptr() },
+            end: unsafe { self.ptr.add(end).as_ptr() },
         }
     }
 
@@ -196,6 +236,69 @@ impl<T> Drop for IntoIter<T> {
     }
 }
 
+pub struct Drain<'a, T> {
+    vec: NonNull<Vec<T>>,
+    _marker: PhantomData<&'a mut Vec<T>>,
+    tail_start: usize,
+    tail_len: usize,
+    beg: *const T,
+    end: *const T,
+}
+
+impl<T> Drop for Drain<'_, T> {
+    fn drop(&mut self) {
+        for _ in &mut *self {} // drop remaining elements
+
+        if self.tail_len > 0 {
+            let vec = unsafe { self.vec.as_mut() };
+            let drain_start = vec.len;
+            if self.tail_start > drain_start {
+                unsafe {
+                    // copy tail to the start of the drain
+                    vec.ptr
+                        .add(self.tail_start)
+                        .copy_to(vec.ptr.add(drain_start), self.tail_len);
+                }
+            }
+            vec.len += self.tail_len; // restore proper len
+        }
+    }
+}
+
+impl<T> Iterator for Drain<'_, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        if self.beg == self.end {
+            None
+        } else {
+            unsafe {
+                let result = self.beg.read();
+                self.beg = self.beg.add(1);
+                Some(result)
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = (self.end as usize - self.beg as usize) / size_of::<T>();
+        (remaining, Some(remaining))
+    }
+}
+
+impl<T> DoubleEndedIterator for Drain<'_, T> {
+    fn next_back(&mut self) -> Option<T> {
+        if self.beg == self.end {
+            None
+        } else {
+            unsafe {
+                self.end = self.end.sub(1);
+                Some(self.end.read())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn drops_values() {
+    fn drops_elements() {
         static mut DROP_COUNT: u32 = 0;
         struct S(#[allow(dead_code)] u32); // use u32 so that S is not a ZST
         impl Drop for S {
@@ -271,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn iterator_drops_values() {
+    fn iterator_drops_elements() {
         static mut DROP_COUNT: u32 = 0;
         struct S(#[allow(dead_code)] u32); // use u32 so that S is not a ZST
         impl Drop for S {
@@ -285,6 +388,77 @@ mod tests {
         v.push(S(0));
         v.push(S(0));
         drop(v.into_iter());
+        assert_eq!(unsafe { DROP_COUNT }, 3);
+    }
+
+    #[test]
+    fn drain() {
+        let mut v: Vec<i32> = Vec::new();
+        assert_eq!(v.drain(..).next(), None);
+        assert_eq!(v.len(), 0);
+
+        fn vec() -> Vec<i32> {
+            let mut v = Vec::new();
+            v.push(6);
+            v.push(7);
+            v.push(8);
+            v.push(9);
+            v
+        }
+
+        let mut v = vec();
+        v.drain(..);
+        assert_eq!(v.len(), 0);
+
+        let mut v = vec();
+        let mut d = v.drain(1..3);
+        assert_eq!(d.next(), Some(7));
+        assert_eq!(d.next(), Some(8));
+        assert_eq!(d.next(), None);
+        drop(d);
+        assert_eq!(&v[..], [6, 9]);
+
+        let mut v = vec();
+        let mut d = v.drain(..2);
+        assert_eq!(d.next(), Some(6));
+        assert_eq!(d.next(), Some(7));
+        assert_eq!(d.next(), None);
+        drop(d);
+        assert_eq!(&v[..], [8, 9]);
+
+        let mut v = vec();
+        let mut d = v.drain(2..);
+        assert_eq!(d.next(), Some(8));
+        assert_eq!(d.next(), Some(9));
+        assert_eq!(d.next(), None);
+        drop(d);
+        assert_eq!(&v[..], [6, 7]);
+
+        // empty drain
+        let mut v = vec();
+        assert_eq!(v.drain(2..2).next(), None);
+        assert_eq!(v.len(), 4);
+
+        let mut v = vec();
+        std::mem::forget(v.drain(2..));
+        assert_eq!(&v[..], [6, 7]);
+    }
+
+    #[test]
+    fn drain_drops_elements() {
+        static mut DROP_COUNT: u32 = 0;
+        struct S(#[allow(dead_code)] u32); // use u32 so that S is not a ZST
+        impl Drop for S {
+            fn drop(&mut self) {
+                unsafe { DROP_COUNT += 1 };
+            }
+        }
+
+        let mut v = Vec::new();
+        v.push(S(0));
+        v.push(S(0));
+        v.push(S(0));
+        v.drain(..);
         assert_eq!(unsafe { DROP_COUNT }, 3);
     }
 }
